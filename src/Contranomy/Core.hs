@@ -1,6 +1,10 @@
-module Contranomy.Core (topEntity) where
+module Contranomy.Core (topEntity,plus) where
 
 import Clash.Prelude
+
+import Contranomy.Decode
+import Contranomy.RV32IM
+import Contranomy.WishBone
 
 plus :: Signed 8 -> Signed 8 -> Signed 8
 plus a b = a + b

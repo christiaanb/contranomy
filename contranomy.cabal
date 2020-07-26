@@ -71,7 +71,9 @@ library
   import: common-options
   hs-source-dirs: src
   exposed-modules:
+    Contranomy.Decode
     Contranomy.Core
+    Contranomy.RV32IM
   default-language: Haskell2010
 
 executable clash

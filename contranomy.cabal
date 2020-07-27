@@ -1,9 +1,11 @@
 cabal-version:       2.4
 name:                contranomy
 version:             0.1
+License:             BSD-2-Clause
 license-file:        LICENSE
 author:              Christiaan Baaij
 maintainer:          christiaan.baaij@gmail.com
+Copyright:           Copyright © 2020, Christiaan Baaij
 
 common common-options
   default-extensions:

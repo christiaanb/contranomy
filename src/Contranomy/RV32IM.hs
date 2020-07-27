@@ -31,6 +31,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -}
 
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Contranomy.RV32IM
   ( Register(..)
   , CSRRegister(..)
@@ -75,7 +77,7 @@ data Instr
   | RRInstr !RegisterRegisterInstr
   | RIInstr !RegisterImmediateInstr
   | SyncInstr !SynchronizationInstr
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 -- R: 7, 5, 5, 3, 5, 7
 -- M: 7, 5, 5, 3, 5, 7
@@ -86,7 +88,7 @@ data JumpInstr
   | JALR !Word12
          !Register
          !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data BranchCond
   = BEQ
@@ -95,26 +97,26 @@ data BranchCond
   | BLTU
   | BGE
   | BGEU
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data BranchInstr =
   Branch !Word12
          !BranchCond
          !Register
          !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data LoadWidth
   = Width !Width
   | HalfUnsigned
   | ByteUnsigned
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data Width
   = Byte
   | Half
   | Word
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data MemoryInstr
   = LOAD !LoadWidth
@@ -125,7 +127,7 @@ data MemoryInstr
           !Word12
           !Register
           !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data IOpcode
   = ADDI
@@ -134,13 +136,13 @@ data IOpcode
   | XORI
   | ORI
   | ANDI
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data ShiftOpcode
   = SLLI
   | SRLI
   | SRAI
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data RegisterImmediateInstr
   = IInstr !IOpcode
@@ -155,7 +157,7 @@ data RegisterImmediateInstr
         !Register
   | AUIPC !Word20
           !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data ROpcode
   = ADD
@@ -176,42 +178,44 @@ data ROpcode
   | DIVU
   | REM
   | REMU
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data RegisterRegisterInstr =
   RInstr !ROpcode
          !Register
          !Register
          !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data SyncOrdering = SyncOrd
   { deviceInput :: !Bool
   , deviceOutput :: !Bool
   , memoryReads :: !Bool
   , memoryWrites :: !Bool
-  } deriving (Show, Eq, Ord)
+  } deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data SynchronizationInstr
   = FENCE !SyncOrdering
           !SyncOrdering
   | FENCEI
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data EnvironmentInstr
   = ECALL
   | EBREAK
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 -- | Control and status register instruction type
 data CSRType
   = ReadWrite
   | ReadSet
   | ReadClear
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 
-newtype CSRRegister = CSRRegister Word12 deriving (Show, Eq, Ord)
+newtype CSRRegister = CSRRegister Word12
+  deriving stock (Show, Eq, Ord)
+  deriving newtype (NFDataX)
 
 -- | Control and Status Register Instructions
 data CSRInstr
@@ -223,7 +227,7 @@ data CSRInstr
               !CSRRegister
               !Word5
               !Register
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
 
 -- | Register 1-31 are general-purpose registers holding integer
 -- values.
@@ -262,7 +266,7 @@ data Register
   | X29
   | X30
   | X31
-  deriving (Show, Eq, Ord, Generic, BitPack)
+  deriving (Show, Eq, Ord, Generic, BitPack, NFDataX)
 
 type Word5 = Unsigned 5
 type Word12 = Unsigned 12

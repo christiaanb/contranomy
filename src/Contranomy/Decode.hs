@@ -53,7 +53,8 @@ decodeInstruction word = fromMaybe noop $ case opCode of
   _ -> Nothing
  where
   opCode = slice d6 d0 word
-  noop   = RIInstr (IInstr ADDI 0 X0 X0)
+
+noop = RIInstr (IInstr ADDI 0 X0 X0)
 
 decodeBranchCond ::  BitVector 3 -> Maybe BranchCond
 decodeBranchCond cond = case cond of

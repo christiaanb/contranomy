@@ -5,6 +5,7 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 -}
 
 {-# LANGUAGE PatternSynonyms #-}
+
 module Contranomy.WishBone where
 
 import Clash.Prelude
@@ -18,21 +19,21 @@ data WishBoneM2S bytes addressWidth
     -- | SEL
   , select :: BitVector bytes
     -- | CYC
-  , cycle :: Bit
+  , cycle :: Bool
     -- | STB
-  , strobe :: Bit
+  , strobe :: Bool
     -- | WE
-  , writeEnable :: Bit
+  , writeEnable :: Bool
     -- | CTI
-  , cycleTypeIdentifier :: BitVector 3
+  , cycleTypeIdentifier :: CycleTypeIdentifier
     -- | BTE
-  , burstTypeExtension :: BitVector 2
+  , burstTypeExtension :: BurstTypeExtension
   }
 
 data WishBoneS2M bytes
   = WishBoneS2M
   { -- | DAT
-    readData :: BitVector bytes
+    readData :: BitVector (8 * bytes)
     -- | ACK
   , acknowledge :: Bit
     -- | ERR

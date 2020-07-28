@@ -4,6 +4,7 @@ License    :  BSD2 (see the file LICENSE)
 Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 -}
 
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
 module Contranomy.Core (topEntity,plus) where
@@ -25,6 +26,7 @@ data CoreState
   { stage :: CoreStage
   , pc :: Unsigned 32
   , instruction :: Instr
+  , registers :: Vec 31 (Unsigned 32)
   }
   deriving (Generic, NFDataX)
 
@@ -51,21 +53,45 @@ core = mealyB transition cpuStart
     , ( WishBoneM2S 4 32
       , WishBoneM2S 4 32 ))
   transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,dBus)
-    | bitCoerce (acknowledge iBus)
-    = ( s { stage = Execute
-          , pc = pc+4
+    = ( s { stage = if bitCoerce (acknowledge iBus) then
+                      Execute
+                    else
+                      InstructionFetch
           , instruction = decodeInstruction (readData iBus)
           }
-      , ( defM2S
-        , defM2S ) )
-    | otherwise
-    = ( s
-      , ( defM2S { addr = pack pc
-                 , cycle = True
+      , ( defM2S { addr   = pack pc
+                 , cycle  = True
                  , strobe = True
                  }
-        , defM2S )
-      )
+        , defM2S ) )
+
+  transition s@(CoreState { stage = Execute, instruction, pc, registers }) (iBus,dBus)
+    =
+    let dstReg = case instruction of
+          RRInstr (RInstr {dest} ) -> Just dest
+          RIInstr iinstr
+            | IInstr {dest} <- iinstr -> Just dest
+            | ShiftInstr {dest} <- iinstr -> Just dest
+            | LUI {dest} <- iinstr -> Just dest
+            | AUIPC {dest} <- iinstr -> Just dest
+          CSRInstr _ -> error "Not yet implemented"
+          _ -> Nothing
+    in
+      ( s { pc = case instruction of
+              BranchInstr {} -> error "Not yet implemented"
+              JumpInstr {} -> error "Not yet implemented"
+              _ -> pc + 4
+          -- , registers = case instruction of
+          --     CSRInstr !CSRInstr -> error "Not yet implemented"
+          --     EnvironmentInstr !EnvironmentInstr -> error "Not yet implemented"
+          --     MemoryInstr !MemoryInstr -> error "Not yet implemented"
+          --     RRInstr (RInstr op src2 src1 dst) -> error "Not yet implemented"
+          --     RIInstr !RegisterImmediateInstr -> error "Not yet implemented"
+          --     _ -> registers
+          }
+      , ( defM2S
+        , defM2S
+        ) )
 
   defM2S :: WishBoneM2S 4 32
   defM2S

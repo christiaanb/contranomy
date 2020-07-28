@@ -31,6 +31,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -}
 
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Contranomy.RV32IM
@@ -83,11 +84,13 @@ data Instr
 -- M: 7, 5, 5, 3, 5, 7
 
 data JumpInstr
-  = JAL !Word20
-        !Register
-  | JALR !Word12
-         !Register
-         !Register
+  = JAL { imm  :: !Word20
+        , dest :: !Register
+        }
+  | JALR { offset :: !Word12
+         , base   :: !Register
+         , dest   :: !Register
+         }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data BranchCond
@@ -99,11 +102,13 @@ data BranchCond
   | BGEU
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
-data BranchInstr =
-  Branch !Word12
-         !BranchCond
-         !Register
-         !Register
+data BranchInstr
+  = Branch
+  { imm  :: !Word12
+  , cond :: !BranchCond
+  , src2 :: !Register
+  , src1 :: !Register
+  }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data LoadWidth
@@ -119,14 +124,16 @@ data Width
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data MemoryInstr
-  = LOAD !LoadWidth
-         !Word12
-         !Register
-         !Register
-  | STORE !Width
-          !Word12
-          !Register
-          !Register
+  = LOAD { loadWidth  :: !LoadWidth
+         , offset :: !Word12
+         , base   :: !Register
+         , dest   :: !Register
+         }
+  | STORE { width  :: !Width
+          , offset :: !Word12
+          , src    :: !Register
+          , base   :: !Register
+          }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data IOpcode
@@ -145,18 +152,22 @@ data ShiftOpcode
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data RegisterImmediateInstr
-  = IInstr !IOpcode
-           !Word12
-           !Register
-           !Register
-  | ShiftInstr !ShiftOpcode
-               !Word5
-               !Register
-               !Register
-  | LUI !Word20
-        !Register
-  | AUIPC !Word20
-          !Register
+  = IInstr { iOpcode :: !IOpcode
+           , imm12   :: !Word12
+           , src     :: !Register
+           , dest    :: !Register
+           }
+  | ShiftInstr { sOpcode :: !ShiftOpcode
+               , shamt   :: !Word5
+               , src     :: !Register
+               , dest    :: !Register
+               }
+  | LUI { imm20 :: !Word20
+        , dest  :: !Register
+        }
+  | AUIPC { imm20 :: !Word20
+          , dest  :: !Register
+          }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data ROpcode
@@ -180,11 +191,13 @@ data ROpcode
   | REMU
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
-data RegisterRegisterInstr =
-  RInstr !ROpcode
-         !Register
-         !Register
-         !Register
+data RegisterRegisterInstr
+  = RInstr
+  { opcode :: !ROpcode
+  , src2   :: !Register
+  , src1   :: !Register
+  , dest   :: !Register
+  }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 data SyncOrdering = SyncOrd
@@ -219,14 +232,16 @@ newtype CSRRegister = CSRRegister Word12
 
 -- | Control and Status Register Instructions
 data CSRInstr
-  = CSRRInstr !CSRType
-              !CSRRegister
-              !Register
-              !Register
-  | CSRIInstr !CSRType
-              !CSRRegister
-              !Word5
-              !Register
+  = CSRRInstr { csrType :: !CSRType
+              , csr     :: !CSRRegister
+              , src     :: !Register
+              , dest    :: !Register
+              }
+  | CSRIInstr { csrType :: !CSRType
+              , csr     :: !CSRRegister
+              , imm     :: !Word5
+              , dest    :: !Register
+              }
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 -- | Register 1-31 are general-purpose registers holding integer

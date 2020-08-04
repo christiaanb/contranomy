@@ -76,6 +76,7 @@ library
     Contranomy.Decode
     Contranomy.Core
     Contranomy.RV32IM
+    Contranomy.WishBone
   default-language: Haskell2010
 
 executable clash

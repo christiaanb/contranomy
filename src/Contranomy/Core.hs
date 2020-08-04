@@ -7,7 +7,7 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
-module Contranomy.Core (topEntity,plus) where
+module Contranomy.Core (core) where
 
 import Clash.Prelude hiding (cycle, select)
 
@@ -70,7 +70,7 @@ core = mealyB transition cpuStart
     let registers0 = 0 :> registers
 
         dstReg = case instruction of
-          RRInstr (RInstr {dest} ) -> Just dest
+          RRInstr (RInstr {dest}) -> Just dest
           RIInstr iinstr -> case iinstr of
             IInstr {dest} -> Just dest
             ShiftInstr {dest} -> Just dest
@@ -232,16 +232,3 @@ core = mealyB transition cpuStart
     , cycleTypeIdentifier = Classic
     , burstTypeExtension = LinearBurst
     }
-
-
-plus :: Signed 8 -> Signed 8 -> Signed 8
-plus a b = a + b
-
--- | 'topEntity' is Clash's equivalent of 'main' in other programming
--- languages. Clash will look for it when compiling 'Example.Project'
--- and translate it to HDL. While polymorphism can be used freely in
--- Clash projects, a 'topEntity' must be monomorphic and must use non-
--- recursive types. Or, to put it hand-wavily, a 'topEntity' must be
--- translatable to a static number of wires.
-topEntity :: Signed 8 -> Signed 8 -> Signed 8
-topEntity = plus

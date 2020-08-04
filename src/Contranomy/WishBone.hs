@@ -42,6 +42,7 @@ data WishBoneS2M bytes
 
 newtype CycleTypeIdentifier = CycleTypeIdentifier (BitVector 3)
 
+pattern Classic, ConstantAddressBurst, IncrementingBurst, EndOfBurst :: CycleTypeIdentifier
 pattern Classic = CycleTypeIdentifier 0
 pattern ConstantAddressBurst = CycleTypeIdentifier 1
 pattern IncrementingBurst = CycleTypeIdentifier 2
@@ -49,6 +50,7 @@ pattern EndOfBurst = CycleTypeIdentifier 7
 
 newtype BurstTypeExtension = BurstTypeExtension (BitVector 2)
 
+pattern LinearBurst, Beat4Burst, Beat8Burst, Beat16Burst :: BurstTypeExtension
 pattern LinearBurst = BurstTypeExtension 0
 pattern Beat4Burst = BurstTypeExtension 1
 pattern Beat8Burst = BurstTypeExtension 2

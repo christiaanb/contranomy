@@ -30,6 +30,10 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -}
+
+{-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE NamedFieldPuns #-}
+
 module Contranomy.Decode where
 
 import Data.Maybe
@@ -54,9 +58,10 @@ decodeInstruction word = fromMaybe noop $ case opCode of
  where
   opCode = slice d6 d0 word
 
+noop :: Instr
 noop = RIInstr (IInstr ADDI 0 X0 X0)
 
-decodeBranchCond ::  BitVector 3 -> Maybe BranchCond
+decodeBranchCond :: BitVector 3 -> Maybe BranchCond
 decodeBranchCond cond = case cond of
   0b000 -> pure BEQ
   0b001 -> pure BNE
@@ -68,14 +73,14 @@ decodeBranchCond cond = case cond of
 
 decodeBranchInstr :: BitVector 32 -> Maybe BranchInstr
 decodeBranchInstr word = do
-  condD <- decodeBranchCond cond
-  pure (Branch imm condD src2 src1)
+  cond <- decodeBranchCond condBV
+  pure (Branch {imm, cond, src2, src1})
  where
   imm12    = slice d31 d31 word
   imm10to5 = slice d30 d25 word
   src2     = unpack (slice d24 d20 word)
   src1     = unpack (slice d19 d15 word)
-  cond     = slice d14 d12 word
+  condBV   = slice d14 d12 word
   imm4to1  = slice d11 d8 word
   imm11    = slice d7 d7 word
   imm      = unpack (imm12 ++# imm11 ++# imm10to5 ++# imm4to1)

@@ -13,31 +13,31 @@ import Clash.Prelude
 data WishBoneM2S bytes addressWidth
   = WishBoneM2S
   { -- | ADR
-    addr :: BitVector addressWidth
+    addr :: "ADR" ::: BitVector addressWidth
     -- | DAT
-  , writeData :: BitVector (8 * bytes)
+  , writeData :: "DAT_MOSI" ::: BitVector (8 * bytes)
     -- | SEL
-  , select :: BitVector bytes
+  , select :: "SEL" ::: BitVector bytes
     -- | CYC
-  , cycle :: Bool
+  , cycle :: "CYC" ::: Bool
     -- | STB
-  , strobe :: Bool
+  , strobe :: "STB" ::: Bool
     -- | WE
-  , writeEnable :: Bool
+  , writeEnable :: "WE" ::: Bool
     -- | CTI
-  , cycleTypeIdentifier :: CycleTypeIdentifier
+  , cycleTypeIdentifier :: "CTI" ::: CycleTypeIdentifier
     -- | BTE
-  , burstTypeExtension :: BurstTypeExtension
+  , burstTypeExtension :: "BTE" ::: BurstTypeExtension
   }
 
 data WishBoneS2M bytes
   = WishBoneS2M
   { -- | DAT
-    readData :: BitVector (8 * bytes)
+    readData :: "DAT_MISO" ::: BitVector (8 * bytes)
     -- | ACK
-  , acknowledge :: Bit
+  , acknowledge :: "ACK" ::: Bit
     -- | ERR
-  , err :: Bit
+  , err :: "ERR" ::: Bit
   }
 
 newtype CycleTypeIdentifier = CycleTypeIdentifier (BitVector 3)

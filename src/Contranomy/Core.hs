@@ -30,11 +30,11 @@ data CoreState
   deriving (Generic, NFDataX)
 
 core ::
-  SystemClockResetEnable =>
-  ( Signal System (WishBoneS2M 4)
-  , Signal System (WishBoneS2M 4) ) ->
-  ( Signal System (WishBoneM2S 4 32)
-  , Signal System (WishBoneM2S 4 32)
+  HiddenClockResetEnable dom =>
+  ( Signal dom (WishBoneS2M 4)
+  , Signal dom (WishBoneS2M 4) ) ->
+  ( Signal dom (WishBoneM2S 4 32)
+  , Signal dom (WishBoneM2S 4 32)
   )
 core = mealyB transition cpuStart
  where

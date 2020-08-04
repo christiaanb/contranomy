@@ -73,8 +73,9 @@ library
   import: common-options
   hs-source-dirs: src
   exposed-modules:
-    Contranomy.Decode
+    Contranomy
     Contranomy.Core
+    Contranomy.Decode
     Contranomy.RV32IM
     Contranomy.WishBone
   default-language: Haskell2010

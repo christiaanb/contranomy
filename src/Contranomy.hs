@@ -1,3 +1,9 @@
+{-|
+Copyright  :  (C) 2020, Christiaan Baaij
+License    :  BSD2 (see the file LICENSE)
+Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
+-}
+
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Contranomy where
 

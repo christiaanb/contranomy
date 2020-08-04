@@ -14,7 +14,7 @@ contronomy ::
   "reset" ::: Reset Core ->
   ( "iBusWishbone" ::: Signal Core (WishBoneS2M 4)
   , "dBusWishbone" ::: Signal Core (WishBoneS2M 4) ) ->
-  ( "iBusWishbone" ::: Signal Core (WishBoneM2S 4 32)
+  ( "iBusWishbone" ::: Signal Core (WishBoneM2S 4 30)
   , "dbusWishbone" ::: Signal Core (WishBoneM2S 4 32)
   )
 contronomy clk rst = exposeClockResetEnable core clk rst enableGen

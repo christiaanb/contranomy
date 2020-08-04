@@ -68,6 +68,7 @@ module Contranomy.RV32IM
   ) where
 
 import Clash.Prelude
+import Clash.Annotations.BitRepresentation.Deriving
 
 data Instr
   = BranchInstr !BranchInstr
@@ -281,8 +282,19 @@ data Register
   | X29
   | X30
   | X31
-  deriving (Show, Eq, Ord, Enum, Generic, BitPack, NFDataX)
+  deriving (Show, Eq, Ord, Generic, NFDataX)
+
+-- We cannot use a derived Enum because it use dataToTag/tagToEnum, which is
+-- invalid for types with custom bit representations
+instance Enum Register where
+  toEnum = unpack . toEnum
+  fromEnum = fromEnum . pack
 
 type Word5 = BitVector 5
 type Word12 = BitVector 12
 type Word20 = BitVector 20
+
+-- Use custom bit-representation, so we can get a TH-derived bitpack instance,
+-- which significantly reduces generated Verilog
+deriveDefaultAnnotation [t|Register|]
+deriveBitPack  [t|Register|]

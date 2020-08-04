@@ -33,7 +33,7 @@ core ::
   HiddenClockResetEnable dom =>
   ( Signal dom (WishBoneS2M 4)
   , Signal dom (WishBoneS2M 4) ) ->
-  ( Signal dom (WishBoneM2S 4 32)
+  ( Signal dom (WishBoneM2S 4 30)
   , Signal dom (WishBoneM2S 4 32)
   )
 core = mealyB transition cpuStart
@@ -50,7 +50,7 @@ core = mealyB transition cpuStart
     CoreState ->
     ( WishBoneS2M 4, WishBoneS2M 4 ) ->
     ( CoreState
-    , ( WishBoneM2S 4 32
+    , ( WishBoneM2S 4 30
       , WishBoneM2S 4 32 ))
   transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
     = ( s { stage = if bitCoerce (acknowledge iBus) then
@@ -59,7 +59,8 @@ core = mealyB transition cpuStart
                       InstructionFetch
           , instruction = decodeInstruction (readData iBus)
           }
-      , ( defM2S { addr   = pack pc
+      , ( (defM2S @30)
+                 { addr   = slice d31 d2 pc
                  , cycle  = True
                  , strobe = True
                  }
@@ -194,14 +195,14 @@ core = mealyB transition cpuStart
         , case instruction of
             MemoryInstr minstr -> case minstr of
               LOAD {loadWidth,offset,base} ->
-                defM2S
+                (defM2S @32)
                   { addr   = registers0 !! base + signExtend offset
                   , select = loadWidthSelect loadWidth
                   , cycle  = True
                   , strobe = True
                   }
               STORE {width,offset,src,base} ->
-                defM2S
+                (defM2S @4 @32)
                   { addr = registers0 !! base + signExtend offset
                   , writeData = registers0 !! src
                   , select = loadWidthSelect (Width width)
@@ -219,16 +220,3 @@ core = mealyB transition cpuStart
     Width Word -> 0b1111
     HalfUnsigned -> 0b0011
     ByteUnsigned -> 0b0001
-
-  defM2S :: WishBoneM2S 4 32
-  defM2S
-    = WishBoneM2S
-    { addr = 0
-    , writeData = 0
-    , select = maxBound
-    , cycle = False
-    , strobe = False
-    , writeEnable = False
-    , cycleTypeIdentifier = Classic
-    , burstTypeExtension = LinearBurst
-    }

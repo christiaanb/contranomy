@@ -8,7 +8,7 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 
 module Contranomy.WishBone where
 
-import Clash.Prelude
+import Clash.Prelude hiding (cycle, select)
 
 data WishBoneM2S bytes addressWidth
   = WishBoneM2S
@@ -55,3 +55,19 @@ pattern LinearBurst = BurstTypeExtension 0
 pattern Beat4Burst = BurstTypeExtension 1
 pattern Beat8Burst = BurstTypeExtension 2
 pattern Beat16Burst = BurstTypeExtension 3
+
+defM2S ::
+  forall addressWidth bytes .
+  (KnownNat bytes, KnownNat addressWidth) =>
+  WishBoneM2S bytes addressWidth
+defM2S
+  = WishBoneM2S
+  { addr = 0
+  , writeData = 0
+  , select = maxBound
+  , cycle = False
+  , strobe = False
+  , writeEnable = False
+  , cycleTypeIdentifier = Classic
+  , burstTypeExtension = LinearBurst
+  }

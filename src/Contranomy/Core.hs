@@ -80,6 +80,9 @@ core = mealyB transition cpuStart
           MemoryInstr minstr -> case minstr of
             LOAD {dest} | bitCoerce (acknowledge dBus) -> Just dest
             _ -> Nothing
+          JumpInstr jinstr -> case jinstr of
+            JAL {dest} -> Just dest
+            JALR {dest} -> Just dest
           _ -> Nothing
 
         aluResult = case instruction of
@@ -148,8 +151,11 @@ core = mealyB transition cpuStart
               ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBus))
               _ -> readData dBus
             _ -> 0
+          JumpInstr jinstr -> case jinstr of
+            JAL {imm} -> signExtend imm + 4
+            JALR {offset,base} ->
+              (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0) + 4
           _ -> 0
-
     in
       ( s { stage = case instruction of
               MemoryInstr {} ->
@@ -159,10 +165,27 @@ core = mealyB transition cpuStart
                   Execute
               _ -> InstructionFetch
           , pc = case instruction of
-              BranchInstr {} -> error "Not yet implemented"
-              JumpInstr {} -> error "Not yet implemented"
-              EnvironmentInstr {} -> error "Not yet implemented"
-              _ -> pc + 4
+              BranchInstr (Branch {imm,cond,src1,src2}) ->
+                let arg1 = registers0 !! src1
+                    arg2 = registers0 !! src2
+                    taken = case cond of
+                      BEQ -> arg1 == arg2
+                      BNE -> arg1 /= arg2
+                      BLT -> (unpack arg1 :: Signed 32) < unpack arg2
+                      BLTU -> arg1 < arg2
+                      BGE -> (unpack arg2 :: Signed 32) > unpack arg2
+                      BGEU -> arg1 > arg2
+                in if taken then
+                     pc + unpack (signExtend imm `shiftL` 1)
+                   else
+                     pc + 4
+              JumpInstr jinstr -> case jinstr of
+                JAL {imm} ->
+                  unpack (signExtend imm `shiftL` 1)
+                JALR {offset,base} ->
+                  unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
+              MemoryInstr {} | not (bitCoerce (acknowledge dBus)) -> pc
+              _ -> pc+4
           , registers = case dstReg of
               Just dst -> tail (replace dst aluResult registers0)
               Nothing  -> registers

@@ -281,8 +281,8 @@ data Register
   | X29
   | X30
   | X31
-  deriving (Show, Eq, Ord, Generic, BitPack, NFDataX)
+  deriving (Show, Eq, Ord, Enum, Generic, BitPack, NFDataX)
 
-type Word5 = Unsigned 5
-type Word12 = Unsigned 12
-type Word20 = Unsigned 20
+type Word5 = BitVector 5
+type Word12 = BitVector 12
+type Word20 = BitVector 20

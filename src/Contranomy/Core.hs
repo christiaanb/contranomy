@@ -18,7 +18,6 @@ import Contranomy.WishBone
 data CoreStage
   = InstructionFetch
   | Execute
-  | WriteBack
   deriving (Generic, NFDataX)
 
 data CoreState
@@ -44,6 +43,7 @@ core = mealyB transition cpuStart
     { stage = InstructionFetch
     , pc = 0
     , instruction = noop
+    , registers = deepErrorX "undefined"
     }
 
   transition ::
@@ -52,7 +52,7 @@ core = mealyB transition cpuStart
     ( CoreState
     , ( WishBoneM2S 4 32
       , WishBoneM2S 4 32 ))
-  transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,dBus)
+  transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
     = ( s { stage = if bitCoerce (acknowledge iBus) then
                       Execute
                     else
@@ -65,7 +65,7 @@ core = mealyB transition cpuStart
                  }
         , defM2S ) )
 
-  transition s@(CoreState { stage = Execute, instruction, pc, registers }) (iBus,dBus)
+  transition s@(CoreState { stage = Execute, instruction, pc, registers }) (_,dBus)
     =
     let registers0 = 0 :> registers
 
@@ -77,6 +77,9 @@ core = mealyB transition cpuStart
             LUI {dest} -> Just dest
             AUIPC {dest} -> Just dest
           CSRInstr {} -> error "Not yet implemented"
+          MemoryInstr minstr -> case minstr of
+            LOAD {dest} | bitCoerce (acknowledge dBus) -> Just dest
+            _ -> Nothing
           _ -> Nothing
 
         aluResult = case instruction of
@@ -137,20 +140,62 @@ core = mealyB transition cpuStart
               imm20 ++# 0
             AUIPC {imm20} ->
               pack pc + (imm20 ++# 0)
+          MemoryInstr minstr -> case minstr of
+            LOAD {loadWidth} -> case loadWidth of
+              Width Byte -> signExtend (slice d7 d0 (readData dBus))
+              Width Half -> signExtend (slice d16 d0 (readData dBus))
+              HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBus))
+              ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBus))
+              _ -> readData dBus
+            _ -> 0
           _ -> 0
 
     in
-      ( s { pc = case instruction of
+      ( s { stage = case instruction of
+              MemoryInstr {} ->
+                if bitCoerce (acknowledge dBus) then
+                  InstructionFetch
+                else
+                  Execute
+              _ -> InstructionFetch
+          , pc = case instruction of
               BranchInstr {} -> error "Not yet implemented"
               JumpInstr {} -> error "Not yet implemented"
+              EnvironmentInstr {} -> error "Not yet implemented"
               _ -> pc + 4
           , registers = case dstReg of
               Just dst -> tail (replace dst aluResult registers0)
               Nothing  -> registers
           }
       , ( defM2S
-        , defM2S
+        , case instruction of
+            MemoryInstr minstr -> case minstr of
+              LOAD {loadWidth,offset,base} ->
+                defM2S
+                  { addr   = registers0 !! base + signExtend offset
+                  , select = loadWidthSelect loadWidth
+                  , cycle  = True
+                  , strobe = True
+                  }
+              STORE {width,offset,src,base} ->
+                defM2S
+                  { addr = registers0 !! base + signExtend offset
+                  , writeData = registers0 !! src
+                  , select = loadWidthSelect (Width width)
+                  , cycle = True
+                  , strobe = True
+                  , writeEnable = True
+                  }
+            _ -> defM2S
         ) )
+
+  loadWidthSelect :: LoadWidth -> BitVector 4
+  loadWidthSelect lw = case lw of
+    Width Byte -> 0b0001
+    Width Half -> 0b0011
+    Width Word -> 0b1111
+    HalfUnsigned -> 0b0011
+    ByteUnsigned -> 0b0001
 
   defM2S :: WishBoneM2S 4 32
   defM2S

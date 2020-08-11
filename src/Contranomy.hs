@@ -11,6 +11,7 @@ import Clash.Prelude
 import Clash.Annotations.TH
 
 import Contranomy.Core
+import Contranomy.RVFI
 import Contranomy.WishBone
 
 createDomain vXilinxSystem{vName="Core", vPeriod=hzToPeriod 100e6}
@@ -22,6 +23,7 @@ contronomy ::
   , "dBusWishbone" ::: Signal Core (WishBoneS2M 4) ) ->
   ( "iBusWishbone" ::: Signal Core (WishBoneM2S 4 30)
   , "dbusWishbone" ::: Signal Core (WishBoneM2S 4 32)
+  , "" ::: Signal Core RVFI
   )
 contronomy clk rst = exposeClockResetEnable core clk rst enableGen
 

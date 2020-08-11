@@ -9,10 +9,13 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 
 module Contranomy.Core (core) where
 
+import Data.Maybe
+
 import Clash.Prelude hiding (cycle, select)
 
 import Contranomy.Decode
 import Contranomy.RV32IM
+import Contranomy.RVFI
 import Contranomy.WishBone
 
 data CoreStage
@@ -26,6 +29,8 @@ data CoreState
   , pc :: Unsigned 32
   , instruction :: Instr
   , registers :: Vec 31 (BitVector 32)
+  , rvfiInstr :: BitVector 32
+  , rvfiOrder :: BitVector 64
   }
   deriving (Generic, NFDataX)
 
@@ -35,6 +40,7 @@ core ::
   , Signal dom (WishBoneS2M 4) ) ->
   ( Signal dom (WishBoneM2S 4 30)
   , Signal dom (WishBoneM2S 4 32)
+  , Signal dom RVFI
   )
 core = mealyB transition cpuStart
  where
@@ -44,6 +50,8 @@ core = mealyB transition cpuStart
     , pc = 0
     , instruction = noop
     , registers = deepErrorX "undefined"
+    , rvfiInstr = 0
+    , rvfiOrder = 0
     }
 
   transition ::
@@ -51,22 +59,25 @@ core = mealyB transition cpuStart
     ( WishBoneS2M 4, WishBoneS2M 4 ) ->
     ( CoreState
     , ( WishBoneM2S 4 30
-      , WishBoneM2S 4 32 ))
+      , WishBoneM2S 4 32
+      , RVFI ))
   transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
-    = ( s { stage = if bitCoerce (acknowledge iBus) then
+    = ( s { stage = if acknowledge iBus then
                       Execute
                     else
                       InstructionFetch
           , instruction = decodeInstruction (readData iBus)
+          , rvfiInstr = readData iBus
           }
-      , ( (defM2S @30)
+      , ( (defM2S @4 @30)
                  { addr   = slice d31 d2 pc
                  , cycle  = True
                  , strobe = True
                  }
-        , defM2S ) )
+        , defM2S
+        , defRVFI ) )
 
-  transition s@(CoreState { stage = Execute, instruction, pc, registers }) (_,dBus)
+  transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr, rvfiOrder }) (_,dBusS2M)
     =
     let registers0 = 0 :> registers
 
@@ -79,7 +90,7 @@ core = mealyB transition cpuStart
             AUIPC {dest} -> Just dest
           CSRInstr {} -> error "Not yet implemented"
           MemoryInstr minstr -> case minstr of
-            LOAD {dest} | bitCoerce (acknowledge dBus) -> Just dest
+            LOAD {dest} | acknowledge dBusS2M -> Just dest
             _ -> Nothing
           JumpInstr jinstr -> case jinstr of
             JAL {dest} -> Just dest
@@ -146,71 +157,88 @@ core = mealyB transition cpuStart
               pack pc + (imm20 ++# 0)
           MemoryInstr minstr -> case minstr of
             LOAD {loadWidth} -> case loadWidth of
-              Width Byte -> signExtend (slice d7 d0 (readData dBus))
-              Width Half -> signExtend (slice d16 d0 (readData dBus))
-              HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBus))
-              ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBus))
-              _ -> readData dBus
+              Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
+              Width Half -> signExtend (slice d16 d0 (readData dBusS2M))
+              HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBusS2M))
+              ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBusS2M))
+              _ -> readData dBusS2M
             _ -> 0
           JumpInstr jinstr -> case jinstr of
             JAL {imm} -> signExtend imm + 4
             JALR {offset,base} ->
               (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0) + 4
           _ -> 0
+
+        pcN = case instruction of
+          BranchInstr (Branch {imm,cond,src1,src2}) ->
+            let arg1 = registers0 !! src1
+                arg2 = registers0 !! src2
+                taken = case cond of
+                  BEQ -> arg1 == arg2
+                  BNE -> arg1 /= arg2
+                  BLT -> (unpack arg1 :: Signed 32) < unpack arg2
+                  BLTU -> arg1 < arg2
+                  BGE -> (unpack arg2 :: Signed 32) > unpack arg2
+                  BGEU -> arg1 > arg2
+            in if taken then
+                 pc + unpack (signExtend imm `shiftL` 1)
+               else
+                 pc + 4
+          JumpInstr jinstr -> case jinstr of
+            JAL {imm} ->
+              unpack (signExtend imm `shiftL` 1)
+            JALR {offset,base} ->
+              unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
+          MemoryInstr {} | not (acknowledge dBusS2M) -> pc
+          _ -> pc+4
+
+        dBusM2S = case instruction of
+          MemoryInstr minstr -> case minstr of
+            LOAD {loadWidth,offset,base} ->
+              (defM2S @4 @32)
+                { addr   = registers0 !! base + signExtend offset
+                , select = loadWidthSelect loadWidth
+                , cycle  = True
+                , strobe = True
+                }
+            STORE {width,offset,src,base} ->
+              (defM2S @4 @32)
+                { addr = registers0 !! base + signExtend offset
+                , writeData = registers0 !! src
+                , select = loadWidthSelect (Width width)
+                , cycle = True
+                , strobe = True
+                , writeEnable = True
+                }
+          _ -> defM2S
     in
       ( s { stage = case instruction of
-              MemoryInstr {} ->
-                if bitCoerce (acknowledge dBus) then
-                  InstructionFetch
-                else
-                  Execute
+              MemoryInstr {}
+                | not (acknowledge dBusS2M)
+                -> Execute
               _ -> InstructionFetch
-          , pc = case instruction of
-              BranchInstr (Branch {imm,cond,src1,src2}) ->
-                let arg1 = registers0 !! src1
-                    arg2 = registers0 !! src2
-                    taken = case cond of
-                      BEQ -> arg1 == arg2
-                      BNE -> arg1 /= arg2
-                      BLT -> (unpack arg1 :: Signed 32) < unpack arg2
-                      BLTU -> arg1 < arg2
-                      BGE -> (unpack arg2 :: Signed 32) > unpack arg2
-                      BGEU -> arg1 > arg2
-                in if taken then
-                     pc + unpack (signExtend imm `shiftL` 1)
-                   else
-                     pc + 4
-              JumpInstr jinstr -> case jinstr of
-                JAL {imm} ->
-                  unpack (signExtend imm `shiftL` 1)
-                JALR {offset,base} ->
-                  unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
-              MemoryInstr {} | not (bitCoerce (acknowledge dBus)) -> pc
-              _ -> pc+4
+          , pc = pcN
           , registers = case dstReg of
               Just dst -> tail (replace dst aluResult registers0)
               Nothing  -> registers
+          , rvfiOrder = case instruction of
+              MemoryInstr {}
+                | not (acknowledge dBusS2M)
+                -> rvfiOrder
+              _ -> rvfiOrder + 1
           }
       , ( defM2S
-        , case instruction of
-            MemoryInstr minstr -> case minstr of
-              LOAD {loadWidth,offset,base} ->
-                (defM2S @32)
-                  { addr   = registers0 !! base + signExtend offset
-                  , select = loadWidthSelect loadWidth
-                  , cycle  = True
-                  , strobe = True
-                  }
-              STORE {width,offset,src,base} ->
-                (defM2S @4 @32)
-                  { addr = registers0 !! base + signExtend offset
-                  , writeData = registers0 !! src
-                  , select = loadWidthSelect (Width width)
-                  , cycle = True
-                  , strobe = True
-                  , writeEnable = True
-                  }
-            _ -> defM2S
+        , dBusM2S
+        , toRVFI rvfiInstr
+                 rvfiOrder
+                 instruction
+                 registers0
+                 dstReg
+                 aluResult
+                 pc
+                 pcN
+                 dBusM2S
+                 dBusS2M
         ) )
 
   loadWidthSelect :: LoadWidth -> BitVector 4
@@ -220,3 +248,63 @@ core = mealyB transition cpuStart
     Width Word -> 0b1111
     HalfUnsigned -> 0b0011
     ByteUnsigned -> 0b0001
+
+toRVFI ::
+  -- | Current instruction
+  BitVector 32 ->
+  -- | Instruction index
+  BitVector 64 ->
+  -- | Current decoded instruction
+  Instr ->
+  -- | Registers
+  Vec 32 (BitVector 32) ->
+  -- | Destination register
+  Maybe Register ->
+  -- | Destination register write data
+  BitVector 32 ->
+  -- | Current PC
+  Unsigned 32 ->
+  -- | Next PC
+  Unsigned 32 ->
+  -- | Data Bus M2S
+  WishBoneM2S 4 32 ->
+  -- | Data Bus S2M
+  WishBoneS2M 4 ->
+  RVFI
+toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS2M =
+  let rs1AddrN = case instruction of
+                   BranchInstr (Branch {src1}) -> src1
+                   CSRInstr (CSRRInstr {src}) -> src
+                   JumpInstr (JALR {base}) -> base
+                   MemoryInstr (LOAD {base}) -> base
+                   MemoryInstr (STORE {base}) -> base
+                   RRInstr (RInstr {src1}) -> src1
+                   RIInstr (IInstr {src}) -> src
+                   RIInstr (ShiftInstr {src}) -> src
+                   _ -> X0
+
+      rs2AddrN = case instruction of
+                   BranchInstr (Branch {src2}) -> src2
+                   MemoryInstr (STORE {src}) -> src
+                   RRInstr (RInstr {src2}) -> src2
+                   _ -> X0
+  in  defRVFI
+        { valid = case instruction of
+            MemoryInstr {} -> acknowledge dBusS2M
+            _ -> True
+        , order    = rOrder
+        , insn     = rInsn
+        , rs1Addr  = rs1AddrN
+        , rs2Addr  = rs2AddrN
+        , rs1RData = registers0 !! pack rs1AddrN
+        , rs2RData = registers0 !! pack rs2AddrN
+        , rdAddr   = fromMaybe X0 dstReg
+        , rdWData  = aluResult
+        , pcRData  = pc
+        , pcWData  = pcN
+        , memAddr  = addr dBusM2S
+        , memRMask = select dBusM2S
+        , memWMask = select dBusM2S
+        , memRData = readData dBusS2M
+        , memWData = writeData dBusM2S
+        }

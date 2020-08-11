@@ -35,9 +35,9 @@ data WishBoneS2M bytes
   { -- | DAT
     readData :: "DAT_MISO" ::: BitVector (8 * bytes)
     -- | ACK
-  , acknowledge :: "ACK" ::: Bit
+  , acknowledge :: "ACK" ::: Bool
     -- | ERR
-  , err :: "ERR" ::: Bit
+  , err :: "ERR" ::: Bool
   }
 
 newtype CycleTypeIdentifier = CycleTypeIdentifier (BitVector 3)
@@ -57,7 +57,7 @@ pattern Beat8Burst = BurstTypeExtension 2
 pattern Beat16Burst = BurstTypeExtension 3
 
 defM2S ::
-  forall addressWidth bytes .
+  forall bytes addressWidth .
   (KnownNat bytes, KnownNat addressWidth) =>
   WishBoneM2S bytes addressWidth
 defM2S

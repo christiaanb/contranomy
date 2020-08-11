@@ -12,6 +12,8 @@ data RVFI
   , trap     :: "rvfi_trap"      ::: Bool
   , halt     :: "rvfi_halt"      ::: Bool
   , intr     :: "rvfi_intr"      ::: Bool
+  , mode     :: "rvfi_mode"      ::: BitVector 2
+  , ixl      :: "rvfi_ixl"       ::: BitVector 2
   , rs1Addr  :: "rvfi_rs1_addr"  ::: Register
   , rs2Addr  :: "rvfi_rs2_addr"  ::: Register
   , rs1RData :: "rvfi_rs1_rdata" ::: BitVector 32
@@ -36,6 +38,8 @@ defRVFI
   , trap     = False
   , halt     = False
   , intr     = False
+  , mode     = 3
+  , ixl      = 1
   , rs1Addr  = X0
   , rs2Addr  = X0
   , rs1RData = 0

@@ -299,12 +299,27 @@ toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS
         , rs1RData = registers0 !! pack rs1AddrN
         , rs2RData = registers0 !! pack rs2AddrN
         , rdAddr   = fromMaybe X0 dstReg
-        , rdWData  = aluResult
+          -- Since we take the tail for the written to registers, this is okay
+        , rdWData  = case dstReg of
+                       Just X0 -> 0
+                       _ -> aluResult
         , pcRData  = pc
         , pcWData  = pcN
         , memAddr  = addr dBusM2S
-        , memRMask = select dBusM2S
-        , memWMask = select dBusM2S
-        , memRData = readData dBusS2M
-        , memWData = writeData dBusM2S
+        , memRMask = if strobe dBusM2S && not (writeEnable dBusM2S) then
+                       select dBusM2S
+                     else
+                       0
+        , memWMask = if strobe dBusM2S && writeEnable dBusM2S then
+                       select dBusM2S
+                     else
+                       0
+        , memRData = if strobe dBusM2S && not (writeEnable dBusM2S) then
+                       readData dBusS2M
+                     else
+                       0
+        , memWData = if strobe dBusM2S && writeEnable dBusM2S then
+                       writeData dBusM2S
+                     else
+                       0
         }

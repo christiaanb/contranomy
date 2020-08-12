@@ -179,15 +179,12 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
         MemoryInstr minstr -> case minstr of
           LOAD {loadWidth} -> case loadWidth of
             Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
-            Width Half -> signExtend (slice d16 d0 (readData dBusS2M))
-            HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBusS2M))
+            Width Half -> signExtend (slice d15 d0 (readData dBusS2M))
+            HalfUnsigned -> zeroExtend (slice d15 d0 (readData dBusS2M))
             ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBusS2M))
             _ -> readData dBusS2M
           _ -> 0
-        JumpInstr jinstr -> case jinstr of
-          JAL {imm} -> signExtend imm + 4
-          JALR {offset,base} ->
-            (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0) + 4
+        JumpInstr {} -> pack (pc + 4)
         _ -> 0
 
       pcN = case instruction of

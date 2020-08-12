@@ -67,6 +67,7 @@ module Contranomy.RV32IM
   , Word20
   ) where
 
+import Clash.Class.AutoReg (AutoReg)
 import Clash.Prelude
 import Clash.Annotations.BitRepresentation.Deriving
 
@@ -79,7 +80,7 @@ data Instr
   | RRInstr !RegisterRegisterInstr
   | RIInstr !RegisterImmediateInstr
   | SyncInstr !SynchronizationInstr
-  deriving (Show, Eq, Ord, Generic, NFDataX)
+  deriving (Show, Eq, Ord, Generic, NFDataX, AutoReg)
 
 -- R: 7, 5, 5, 3, 5, 7
 -- M: 7, 5, 5, 3, 5, 7

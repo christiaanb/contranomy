@@ -71,3 +71,14 @@ defM2S
   , cycleTypeIdentifier = Classic
   , burstTypeExtension = LinearBurst
   }
+
+defS2M ::
+  forall bytes .
+  KnownNat bytes =>
+  WishBoneS2M bytes
+defS2M
+  = WishBoneS2M
+  { readData = 0
+  , acknowledge = False
+  , err = False
+  }

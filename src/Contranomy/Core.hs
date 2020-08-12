@@ -6,13 +6,17 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Contranomy.Core (core) where
 
 import Data.Maybe
 
+import Clash.Class.AutoReg as AutoReg
+import qualified Clash.Explicit.Prelude as Explicit
 import Clash.Prelude hiding (cycle, select)
 
+import Contranomy.Clash.Extra
 import Contranomy.Decode
 import Contranomy.RV32IM
 import Contranomy.RVFI
@@ -21,7 +25,7 @@ import Contranomy.WishBone
 data CoreStage
   = InstructionFetch
   | Execute
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, AutoReg)
 
 data CoreState
   = CoreState
@@ -34,6 +38,23 @@ data CoreState
   }
   deriving (Generic, NFDataX)
 
+instance AutoReg CoreState where
+  autoReg clk rst ena CoreState{stage,pc,instruction,registers,rvfiInstr,rvfiOrder} = \inp ->
+    let fld1 = (\CoreState{stage=f} -> f) <$> inp
+        fld2 = (\CoreState{pc=f} -> f) <$> inp
+        fld3 = (\CoreState{instruction=f} -> f) <$> inp
+        fld4 = (\CoreState{registers=f} -> f) <$> inp
+        fld5 = (\CoreState{rvfiInstr=f} -> f) <$> inp
+        fld6 = (\CoreState{rvfiOrder=f} -> f) <$> inp
+    in  CoreState
+           <$> setName @"stage" AutoReg.autoReg clk rst ena stage fld1
+           <*> setName @"pc" AutoReg.autoReg clk rst ena pc fld2
+           <*> setName @"instruction" AutoReg.autoReg clk rst ena instruction fld3
+           <*> setName @"registers" Explicit.register clk rst ena registers fld4
+           <*> setName @"rvfiInstr" AutoReg.autoReg clk rst ena rvfiInstr fld5
+           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld6
+  {-# INLINE autoReg #-}
+
 core ::
   HiddenClockResetEnable dom =>
   ( Signal dom (WishBoneS2M 4)
@@ -42,7 +63,7 @@ core ::
   , Signal dom (WishBoneM2S 4 32)
   , Signal dom RVFI
   )
-core = mealyB transition cpuStart
+core = mealyAutoB transition cpuStart
  where
   cpuStart
     = CoreState
@@ -54,200 +75,202 @@ core = mealyB transition cpuStart
     , rvfiOrder = 0
     }
 
-  transition ::
-    CoreState ->
-    ( WishBoneS2M 4, WishBoneS2M 4 ) ->
-    ( CoreState
-    , ( WishBoneM2S 4 30
-      , WishBoneM2S 4 32
-      , RVFI ))
-  transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
-    = ( s { stage = if acknowledge iBus then
-                      Execute
-                    else
-                      InstructionFetch
-          , instruction = decodeInstruction (readData iBus)
-          , rvfiInstr = readData iBus
-          }
-      , ( (defM2S @4 @30)
-                 { addr   = slice d31 d2 pc
-                 , cycle  = True
-                 , strobe = True
-                 }
-        , defM2S
-        , defRVFI ) )
+transition ::
+  CoreState ->
+  ( WishBoneS2M 4, WishBoneS2M 4 ) ->
+  ( CoreState
+  , ( WishBoneM2S 4 30
+    , WishBoneM2S 4 32
+    , RVFI ))
+transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
+  = ( s { stage = if acknowledge iBus then
+                    Execute
+                  else
+                    InstructionFetch
+        , instruction = decodeInstruction (readData iBus)
+        , rvfiInstr = readData iBus
+        }
+    , ( (defM2S @4 @30)
+               { addr   = slice d31 d2 pc
+               , cycle  = True
+               , strobe = True
+               }
+      , defM2S
+      , defRVFI ) )
 
-  transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr, rvfiOrder }) (_,dBusS2M)
-    =
-    let registers0 = 0 :> registers
+transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr, rvfiOrder }) (_,dBusS2M)
+  =
+  let registers0 = 0 :> registers
 
-        dstReg = case instruction of
-          RRInstr (RInstr {dest}) -> Just dest
-          RIInstr iinstr -> case iinstr of
-            IInstr {dest} -> Just dest
-            ShiftInstr {dest} -> Just dest
-            LUI {dest} -> Just dest
-            AUIPC {dest} -> Just dest
-          CSRInstr {} -> error "Not yet implemented"
-          MemoryInstr minstr -> case minstr of
-            LOAD {dest} | acknowledge dBusS2M -> Just dest
-            _ -> Nothing
-          JumpInstr jinstr -> case jinstr of
-            JAL {dest} -> Just dest
-            JALR {dest} -> Just dest
+      dstReg = case instruction of
+        RRInstr (RInstr {dest}) -> Just dest
+        RIInstr iinstr -> case iinstr of
+          IInstr {dest} -> Just dest
+          ShiftInstr {dest} -> Just dest
+          LUI {dest} -> Just dest
+          AUIPC {dest} -> Just dest
+        CSRInstr {} -> error "Not yet implemented"
+        MemoryInstr minstr -> case minstr of
+          LOAD {dest} | acknowledge dBusS2M -> Just dest
           _ -> Nothing
+        JumpInstr jinstr -> case jinstr of
+          JAL {dest} -> Just dest
+          JALR {dest} -> Just dest
+        _ -> Nothing
 
-        aluResult = case instruction of
-          RRInstr (RInstr {opcode,src1,src2}) ->
-            let arg1 = registers0 !! src1
-                arg2 = registers0 !! src2
-                shiftAmount = unpack (resize (slice d4 d0 arg2))
-            in case opcode of
-              ADD -> arg1 + arg2
-              SUB -> arg1 - arg2
-              SLT -> if (unpack arg1 :: Signed 32) < unpack arg2 then
-                       1
-                     else
-                       0
-              SLTU -> if arg1 < arg2 then
+      aluResult = case instruction of
+        RRInstr (RInstr {opcode,src1,src2}) ->
+          let arg1 = registers0 !! src1
+              arg2 = registers0 !! src2
+              shiftAmount = unpack (resize (slice d4 d0 arg2))
+          in case opcode of
+            ADD -> arg1 + arg2
+            SUB -> arg1 - arg2
+            SLT -> if (unpack arg1 :: Signed 32) < unpack arg2 then
+                     1
+                   else
+                     0
+            SLTU -> if arg1 < arg2 then
+                      1
+                    else
+                      0
+            AND -> arg1 .&. arg2
+            OR -> arg1 .|. arg2
+            XOR -> arg1 `xor` arg2
+            SLL -> shiftL arg1 shiftAmount
+            SRL -> shiftR arg1 shiftAmount
+            SRA -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
+            MUL -> error "Not yet implemented"
+            MULH -> error "Not yet implemented"
+            MULHSU -> error "Not yet implemented"
+            MULHU -> error "Not yet implemented"
+            DIV -> error "Not yet implemented"
+            DIVU -> error "Not yet implemented"
+            REM -> error "Not yet implemented"
+            REMU -> error "Not yet implemented"
+        RIInstr iinstr -> case iinstr of
+          IInstr {iOpcode,src,imm12} ->
+            let arg1 = registers0 !! src
+                arg2 = signExtend imm12
+            in case iOpcode of
+              ADDI -> arg1 + arg2
+              SLTI -> if (unpack arg1 :: Signed 32) < unpack arg2 then
                         1
                       else
                         0
-              AND -> arg1 .&. arg2
-              OR -> arg1 .|. arg2
-              XOR -> arg1 `xor` arg2
-              SLL -> shiftL arg1 shiftAmount
-              SRL -> shiftR arg1 shiftAmount
-              SRA -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
-              MUL -> error "Not yet implemented"
-              MULH -> error "Not yet implemented"
-              MULHSU -> error "Not yet implemented"
-              MULHU -> error "Not yet implemented"
-              DIV -> error "Not yet implemented"
-              DIVU -> error "Not yet implemented"
-              REM -> error "Not yet implemented"
-              REMU -> error "Not yet implemented"
-          RIInstr iinstr -> case iinstr of
-            IInstr {iOpcode,src,imm12} ->
-              let arg1 = registers0 !! src
-                  arg2 = signExtend imm12
-              in case iOpcode of
-                ADDI -> arg1 + arg2
-                SLTI -> if (unpack arg1 :: Signed 32) < unpack arg2 then
-                          1
-                        else
-                          0
-                SLTIU -> if arg1 < arg2 then
-                           1
-                         else
-                           0
-                XORI -> arg1 `xor` arg2
-                ORI -> arg1 .|. arg2
-                ANDI -> arg1 .&. arg2
-            ShiftInstr {sOpcode,src,shamt} ->
-              let arg1 = registers0 !! src
-                  shiftAmount = unpack (resize shamt)
-              in case sOpcode of
-                SLLI -> shiftL arg1 shiftAmount
-                SRLI -> shiftR arg1 shiftAmount
-                SRAI -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
-            LUI {imm20} ->
-              imm20 ++# 0
-            AUIPC {imm20} ->
-              pack pc + (imm20 ++# 0)
-          MemoryInstr minstr -> case minstr of
-            LOAD {loadWidth} -> case loadWidth of
-              Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
-              Width Half -> signExtend (slice d16 d0 (readData dBusS2M))
-              HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBusS2M))
-              ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBusS2M))
-              _ -> readData dBusS2M
-            _ -> 0
-          JumpInstr jinstr -> case jinstr of
-            JAL {imm} -> signExtend imm + 4
-            JALR {offset,base} ->
-              (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0) + 4
+              SLTIU -> if arg1 < arg2 then
+                         1
+                       else
+                         0
+              XORI -> arg1 `xor` arg2
+              ORI -> arg1 .|. arg2
+              ANDI -> arg1 .&. arg2
+          ShiftInstr {sOpcode,src,shamt} ->
+            let arg1 = registers0 !! src
+                shiftAmount = unpack (resize shamt)
+            in case sOpcode of
+              SLLI -> shiftL arg1 shiftAmount
+              SRLI -> shiftR arg1 shiftAmount
+              SRAI -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
+          LUI {imm20} ->
+            imm20 ++# 0
+          AUIPC {imm20} ->
+            pack pc + (imm20 ++# 0)
+        MemoryInstr minstr -> case minstr of
+          LOAD {loadWidth} -> case loadWidth of
+            Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
+            Width Half -> signExtend (slice d16 d0 (readData dBusS2M))
+            HalfUnsigned -> zeroExtend (slice d16 d0 (readData dBusS2M))
+            ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBusS2M))
+            _ -> readData dBusS2M
           _ -> 0
+        JumpInstr jinstr -> case jinstr of
+          JAL {imm} -> signExtend imm + 4
+          JALR {offset,base} ->
+            (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0) + 4
+        _ -> 0
 
-        pcN = case instruction of
-          BranchInstr (Branch {imm,cond,src1,src2}) ->
-            let arg1 = registers0 !! src1
-                arg2 = registers0 !! src2
-                taken = case cond of
-                  BEQ -> arg1 == arg2
-                  BNE -> arg1 /= arg2
-                  BLT -> (unpack arg1 :: Signed 32) < unpack arg2
-                  BLTU -> arg1 < arg2
-                  BGE -> (unpack arg2 :: Signed 32) > unpack arg2
-                  BGEU -> arg1 > arg2
-            in if taken then
-                 pc + unpack (signExtend imm `shiftL` 1)
-               else
-                 pc + 4
-          JumpInstr jinstr -> case jinstr of
-            JAL {imm} ->
-              unpack (signExtend imm `shiftL` 1)
-            JALR {offset,base} ->
-              unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
-          MemoryInstr {} | not (acknowledge dBusS2M) -> pc
-          _ -> pc+4
+      pcN = case instruction of
+        BranchInstr (Branch {imm,cond,src1,src2}) ->
+          let arg1 = registers0 !! src1
+              arg2 = registers0 !! src2
+              taken = case cond of
+                BEQ -> arg1 == arg2
+                BNE -> arg1 /= arg2
+                BLT -> (unpack arg1 :: Signed 32) < unpack arg2
+                BLTU -> arg1 < arg2
+                BGE -> (unpack arg1 :: Signed 32) >= unpack arg2
+                BGEU -> arg1 >= arg2
+          in if taken then
+               pc + unpack (signExtend imm `shiftL` 1)
+             else
+               pc + 4
+        JumpInstr jinstr -> case jinstr of
+          JAL {imm} ->
+            unpack (signExtend imm `shiftL` 1)
+          JALR {offset,base} ->
+            unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
+        MemoryInstr {} | not (acknowledge dBusS2M) -> pc
+        _ -> pc+4
 
-        dBusM2S = case instruction of
-          MemoryInstr minstr -> case minstr of
-            LOAD {loadWidth,offset,base} ->
-              (defM2S @4 @32)
-                { addr   = registers0 !! base + signExtend offset
-                , select = loadWidthSelect loadWidth
-                , cycle  = True
-                , strobe = True
-                }
-            STORE {width,offset,src,base} ->
-              (defM2S @4 @32)
-                { addr = registers0 !! base + signExtend offset
-                , writeData = registers0 !! src
-                , select = loadWidthSelect (Width width)
-                , cycle = True
-                , strobe = True
-                , writeEnable = True
-                }
-          _ -> defM2S
-    in
-      ( s { stage = case instruction of
-              MemoryInstr {}
-                | not (acknowledge dBusS2M)
-                -> Execute
-              _ -> InstructionFetch
-          , pc = pcN
-          , registers = case dstReg of
-              Just dst -> tail (replace dst aluResult registers0)
-              Nothing  -> registers
-          , rvfiOrder = case instruction of
-              MemoryInstr {}
-                | not (acknowledge dBusS2M)
-                -> rvfiOrder
-              _ -> rvfiOrder + 1
-          }
-      , ( defM2S
-        , dBusM2S
-        , toRVFI rvfiInstr
-                 rvfiOrder
-                 instruction
-                 registers0
-                 dstReg
-                 aluResult
-                 pc
-                 pcN
-                 dBusM2S
-                 dBusS2M
-        ) )
+      dBusM2S = case instruction of
+        MemoryInstr minstr -> case minstr of
+          LOAD {loadWidth,offset,base} ->
+            (defM2S @4 @32)
+              { addr   = registers0 !! base + signExtend offset
+              , select = loadWidthSelect loadWidth
+              , cycle  = True
+              , strobe = True
+              }
+          STORE {width,offset,src,base} ->
+            (defM2S @4 @32)
+              { addr = registers0 !! base + signExtend offset
+              , writeData = registers0 !! src
+              , select = loadWidthSelect (Width width)
+              , cycle = True
+              , strobe = True
+              , writeEnable = True
+              }
+        _ -> defM2S
+  in
+    ( s { stage = case instruction of
+            MemoryInstr {}
+              | not (acknowledge dBusS2M)
+              -> Execute
+            _ -> InstructionFetch
+        , pc = pcN
+        , registers = case dstReg of
+            Just dst -> tail (replace dst aluResult registers0)
+            Nothing  -> registers
+        , rvfiOrder = case instruction of
+            MemoryInstr {}
+              | not (acknowledge dBusS2M)
+              -> rvfiOrder
+            _ -> rvfiOrder + 1
+        }
+    , ( defM2S
+      , dBusM2S
+      , toRVFI rvfiInstr
+               rvfiOrder
+               instruction
+               registers0
+               dstReg
+               aluResult
+               pc
+               pcN
+               dBusM2S
+               dBusS2M
+      ) )
+{-# INLINE transition #-}
 
-  loadWidthSelect :: LoadWidth -> BitVector 4
-  loadWidthSelect lw = case lw of
-    Width Byte -> 0b0001
-    Width Half -> 0b0011
-    Width Word -> 0b1111
-    HalfUnsigned -> 0b0011
-    ByteUnsigned -> 0b0001
+loadWidthSelect :: LoadWidth -> BitVector 4
+loadWidthSelect lw = case lw of
+  Width Byte -> 0b0001
+  Width Half -> 0b0011
+  Width Word -> 0b1111
+  HalfUnsigned -> 0b0011
+  ByteUnsigned -> 0b0001
+{-# INLINE loadWidthSelect #-}
 
 toRVFI ::
   -- | Current instruction
@@ -294,6 +317,10 @@ toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS
             _ -> True
         , order    = rOrder
         , insn     = rInsn
+        , trap     = case instruction of
+                       BranchInstr {} -> slice d1 d0 pcN /= 0
+                       JumpInstr {} -> slice d1 d0 pcN /= 0
+                       _ -> False
         , rs1Addr  = rs1AddrN
         , rs2Addr  = rs2AddrN
         , rs1RData = registers0 !! pack rs1AddrN

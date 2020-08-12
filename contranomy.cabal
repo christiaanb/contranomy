@@ -74,6 +74,7 @@ library
   hs-source-dirs: src
   exposed-modules:
     Contranomy
+    Contranomy.Clash.Extra
     Contranomy.Core
     Contranomy.Decode
     Contranomy.RV32IM

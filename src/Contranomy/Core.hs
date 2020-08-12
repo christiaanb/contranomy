@@ -187,6 +187,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
         JumpInstr {} -> pack (pc + 4)
         _ -> 0
 
+      {-# NOINLINE pcN #-}
       pcN = case instruction of
         BranchInstr (Branch {imm,cond,src1,src2}) ->
           let arg1 = registers0 !! src1
@@ -258,7 +259,6 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
                dBusM2S
                dBusS2M
       ) )
-{-# INLINE transition #-}
 
 loadWidthSelect :: LoadWidth -> BitVector 4
 loadWidthSelect lw = case lw of

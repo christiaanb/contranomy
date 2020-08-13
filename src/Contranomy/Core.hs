@@ -340,8 +340,8 @@ toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS
         , rs2RData = registers0 !! pack rs2AddrN
         , rdAddr   = fromMaybe X0 dstReg
           -- Since we take the tail for the written to registers, this is okay
-        , rdWData  = case dstReg of
-                       Just X0 -> 0
+        , rdWData  = case fromMaybe X0 dstReg of
+                       X0 -> 0
                        _ -> aluResult
         , pcRData  = pc
         , pcWData  = pcN

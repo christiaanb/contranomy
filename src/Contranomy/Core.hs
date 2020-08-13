@@ -140,14 +140,30 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
             SLL -> shiftL arg1 shiftAmount
             SRL -> shiftR arg1 shiftAmount
             SRA -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
-            MUL -> error "Not yet implemented"
-            MULH -> error "Not yet implemented"
-            MULHSU -> error "Not yet implemented"
-            MULHU -> error "Not yet implemented"
-            DIV -> error "Not yet implemented"
-            DIVU -> error "Not yet implemented"
-            REM -> error "Not yet implemented"
-            REMU -> error "Not yet implemented"
+            MUL -> arg1 * arg2
+            MULH -> slice d63 d32 (signExtend arg1 * signExtend arg2 :: BitVector 64)
+            MULHSU -> slice d63 d32 (signExtend arg1 * zeroExtend arg2 :: BitVector 64)
+            MULHU -> slice d63 d32 (zeroExtend arg1 * zeroExtend arg2 :: BitVector 64)
+            DIV -> if arg2 == 0 then
+                     (-1)
+                   else if arg1 == pack (minBound :: Signed 32) && arg2 == (-1) then
+                     pack (minBound :: Signed 32)
+                   else
+                     pack ((unpack arg1 :: Signed 32) `quot` unpack arg2)
+            DIVU -> if arg2 == 0 then
+                      (-1)
+                    else
+                      arg1 `quot` arg2
+            REM -> if arg2 == 0 then
+                     arg1
+                   else if arg1 == pack (minBound :: Signed 32) && arg2 == (-1) then
+                     0
+                   else
+                     pack ((unpack arg1 :: Signed 32) `rem` unpack arg2)
+            REMU -> if arg2 == 0 then
+                      arg1
+                    else
+                      arg1 `rem` arg2
         RIInstr iinstr -> case iinstr of
           IInstr {iOpcode,src,imm12} ->
             let arg1 = registers0 !! src

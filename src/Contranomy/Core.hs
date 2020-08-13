@@ -205,7 +205,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
                pc + 4
         JumpInstr jinstr -> case jinstr of
           JAL {imm} ->
-            unpack (signExtend imm `shiftL` 1)
+            pc + unpack (signExtend imm `shiftL` 1)
           JALR {offset,base} ->
             unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc

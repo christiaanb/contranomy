@@ -109,7 +109,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
           ShiftInstr {dest} -> Just dest
           LUI {dest} -> Just dest
           AUIPC {dest} -> Just dest
-        CSRInstr {} -> error "Not yet implemented"
+        CSRInstr {} -> Nothing -- "Not yet implemented"
         MemoryInstr minstr -> case minstr of
           LOAD {dest} | acknowledge dBusS2M -> Just dest
           _ -> Nothing

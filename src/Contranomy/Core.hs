@@ -4,6 +4,7 @@ License    :  BSD2 (see the file LICENSE)
 Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 -}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -140,6 +141,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
             SLL -> shiftL arg1 shiftAmount
             SRL -> shiftR arg1 shiftAmount
             SRA -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
+#if !defined(RISCV_FORMAL_ALTOPS)
             MUL -> arg1 * arg2
             MULH -> slice d63 d32 (signExtend arg1 * signExtend arg2 :: BitVector 64)
             MULHSU -> slice d63 d32 (signExtend arg1 * zeroExtend arg2 :: BitVector 64)
@@ -164,6 +166,9 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
                       arg1
                     else
                       arg1 `rem` arg2
+#else
+            _ -> 0
+#endif
         RIInstr iinstr -> case iinstr of
           IInstr {iOpcode,src,imm12} ->
             let arg1 = registers0 !! src

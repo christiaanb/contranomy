@@ -16,7 +16,7 @@ import Contranomy.WishBone
 
 createDomain vXilinxSystem{vName="Core", vPeriod=hzToPeriod 100e6}
 
-contranomy ::
+contranomyRVFI ::
   "clk" ::: Clock Core ->
   "reset" ::: Reset Core ->
   ( "iBusWishbone" ::: Signal Core (WishBoneS2M 4)
@@ -25,6 +25,20 @@ contranomy ::
   , "dbusWishbone" ::: Signal Core (WishBoneM2S 4 32)
   , "" ::: Signal Core RVFI
   )
-contranomy clk rst = exposeClockResetEnable core clk rst enableGen
+contranomyRVFI clk rst = exposeClockResetEnable core clk rst enableGen
+
+makeTopEntity 'contranomyRVFI
+
+contranomy ::
+  "clk" ::: Clock Core ->
+  "reset" ::: Reset Core ->
+  ( "iBusWishbone" ::: Signal Core (WishBoneS2M 4)
+  , "dBusWishbone" ::: Signal Core (WishBoneS2M 4) ) ->
+  ( "iBusWishbone" ::: Signal Core (WishBoneM2S 4 30)
+  , "dbusWishbone" ::: Signal Core (WishBoneM2S 4 32)
+  )
+contranomy clk rst = exposeClockResetEnable (dropRVFI . core) clk rst enableGen
+ where
+  dropRVFI (iBus,dBus,_) = (iBus,dBus)
 
 makeTopEntity 'contranomy

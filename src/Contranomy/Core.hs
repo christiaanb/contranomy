@@ -167,7 +167,14 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
                     else
                       arg1 `rem` arg2
 #else
-            _ -> 0
+            MUL -> (arg1 + arg2) `xor` 0x2cdf52a55876063e
+            MULH -> (arg1 + arg2) `xor` 0x15d01651f6583fb7
+            MULHSU -> (arg1 - arg2) `xor` 0xea3969edecfbe137
+            MULHU -> (arg1 + arg2) `xor` 0xd13db50d949ce5e8
+            DIV -> (arg1 - arg2) `xor` 0x29bbf66f7f8529ec
+            DIVU -> (arg1 - arg2) `xor` 0x8c629acb10e8fd70
+            REM -> (arg1 - arg2) `xor` 0xf5b7d8538da68fa5
+            REMU -> (arg1 - arg2) `xor` 0xbc4402413138d0e1
 #endif
         RIInstr iinstr -> case iinstr of
           IInstr {iOpcode,src,imm12} ->
@@ -208,8 +215,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
         JumpInstr {} -> pack (pc + 4)
         _ -> 0
 
-      {-# NOINLINE pcN #-}
-      pcN = case instruction of
+      pcN0 = case instruction of
         BranchInstr (Branch {imm,cond,src1,src2}) ->
           let arg1 = registers0 !! src1
               arg2 = registers0 !! src2
@@ -231,6 +237,9 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
             unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc
         _ -> pc+4
+
+      branchTrap = slice d1 d0 pcN0 /= 0
+      pcN1 = if branchTrap then 0 else pcN0
 
       dBusM2S = case instruction of
         MemoryInstr minstr -> case minstr of
@@ -257,7 +266,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
               | not (acknowledge dBusS2M)
               -> Execute
             _ -> InstructionFetch
-        , pc = pcN
+        , pc = pcN1
         , registers = case dstReg of
             Just dst -> tail (replace dst aluResult registers0)
             Nothing  -> registers
@@ -276,7 +285,8 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
                dstReg
                aluResult
                pc
-               pcN
+               pcN1
+               branchTrap
                dBusM2S
                dBusS2M
       ) )
@@ -307,12 +317,14 @@ toRVFI ::
   Unsigned 32 ->
   -- | Next PC
   Unsigned 32 ->
+  -- | Trap
+  Bool ->
   -- | Data Bus M2S
   WishBoneM2S 4 32 ->
   -- | Data Bus S2M
   WishBoneS2M 4 ->
   RVFI
-toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS2M =
+toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
   let rs1AddrN = case instruction of
                    BranchInstr (Branch {src1}) -> src1
                    CSRInstr (CSRRInstr {src}) -> src
@@ -335,10 +347,7 @@ toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN dBusM2S dBusS
             _ -> True
         , order    = rOrder
         , insn     = rInsn
-        , trap     = case instruction of
-                       BranchInstr {} -> slice d1 d0 pcN /= 0
-                       JumpInstr {} -> slice d1 d0 pcN /= 0
-                       _ -> False
+        , trap     = branchTrap
         , rs1Addr  = rs1AddrN
         , rs2Addr  = rs2AddrN
         , rs1RData = registers0 !! pack rs1AddrN

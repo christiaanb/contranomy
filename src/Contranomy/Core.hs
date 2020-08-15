@@ -20,6 +20,7 @@ import Clash.Prelude hiding (cycle, select)
 
 import Contranomy.Clash.Extra
 import Contranomy.Decode
+import Contranomy.Encode
 import Contranomy.RV32IM
 import Contranomy.RVFI
 import Contranomy.WishBone
@@ -56,7 +57,6 @@ data CoreState
   , mstatus :: MStatus
   , mieMtie :: Bool
   , mcause :: MCause
-  , rvfiInstr :: BitVector 32
   , rvfiOrder :: BitVector 64
   }
   deriving (Generic, NFDataX)
@@ -68,7 +68,7 @@ pattern MEPC_LOCATION = 33
 pattern MTVAL_LOCATION = 34
 
 instance AutoReg CoreState where
-  autoReg clk rst ena CoreState{stage,pc,instruction,registers,mstatus,mieMtie,mcause,rvfiInstr,rvfiOrder} = \inp ->
+  autoReg clk rst ena CoreState{stage,pc,instruction,registers,mstatus,mieMtie,mcause,rvfiOrder} = \inp ->
     let fld1 = (\CoreState{stage=f} -> f) <$> inp
         fld2 = (\CoreState{pc=f} -> f) <$> inp
         fld3 = (\CoreState{instruction=f} -> f) <$> inp
@@ -76,8 +76,7 @@ instance AutoReg CoreState where
         fld5 = (\CoreState{mstatus=f} -> f) <$> inp
         fld6 = (\CoreState{mieMtie=f} -> f) <$> inp
         fld7 = (\CoreState{mcause=f} -> f) <$> inp
-        fld8 = (\CoreState{rvfiInstr=f} -> f) <$> inp
-        fld9 = (\CoreState{rvfiOrder=f} -> f) <$> inp
+        fld8 = (\CoreState{rvfiOrder=f} -> f) <$> inp
     in  CoreState
            <$> setName @"stage" AutoReg.autoReg clk rst ena stage fld1
            <*> setName @"pc" AutoReg.autoReg clk rst ena pc fld2
@@ -86,8 +85,7 @@ instance AutoReg CoreState where
            <*> setName @"mstatus" Explicit.register clk rst ena mstatus fld5
            <*> setName @"mie_mtie" Explicit.register clk rst ena mieMtie fld6
            <*> setName @"mcause" Explicit.register clk rst ena mcause fld7
-           <*> setName @"rvfiInstr" AutoReg.autoReg clk rst ena rvfiInstr fld8
-           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld9
+           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld8
   {-# INLINE autoReg #-}
 
 core ::
@@ -109,7 +107,6 @@ core = mealyAutoB transition cpuStart
     , mstatus = MStatus { mie = False, mpie = False}
     , mieMtie = False
     , mcause = MCause { interrupt = False, code = 0 }
-    , rvfiInstr = 0
     , rvfiOrder = 0
     }
 
@@ -126,7 +123,6 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
                   else
                     InstructionFetch
         , instruction = decodeInstruction (readData iBus)
-        , rvfiInstr = readData iBus
         }
     , ( (defM2S @4 @30)
                { addr   = slice d31 d2 pc
@@ -136,7 +132,7 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
       , defM2S
       , defRVFI ) )
 
-transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, mieMtie, mcause, rvfiInstr, rvfiOrder }) (_,dBusS2M)
+transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, mieMtie, mcause, rvfiOrder }) (_,dBusS2M)
   =
   let registers0 = 0 :> registers
 
@@ -328,8 +324,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
         }
     , ( defM2S
       , dBusM2S
-      , toRVFI rvfiInstr
-               rvfiOrder
+      , toRVFI rvfiOrder
                instruction
                (take d32 registers0)
                dstReg
@@ -351,8 +346,6 @@ loadWidthSelect lw = case lw of
 {-# INLINE loadWidthSelect #-}
 
 toRVFI ::
-  -- | Current instruction
-  BitVector 32 ->
   -- | Instruction index
   BitVector 64 ->
   -- | Current decoded instruction
@@ -374,7 +367,7 @@ toRVFI ::
   -- | Data Bus S2M
   WishBoneS2M 4 ->
   RVFI
-toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
+toRVFI rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
   let rs1AddrN = case instruction of
                    BranchInstr (Branch {src1}) -> src1
                    CSRInstr (CSRRInstr {src}) -> src
@@ -396,7 +389,7 @@ toRVFI rInsn rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dB
             MemoryInstr {} -> acknowledge dBusS2M
             _ -> True
         , order    = rOrder
-        , insn     = rInsn
+        , insn     = encodeInstruction instruction
         , trap     = branchTrap
         , rs1Addr  = rs1AddrN
         , rs2Addr  = rs2AddrN

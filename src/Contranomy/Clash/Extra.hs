@@ -17,3 +17,11 @@ mealyAutoB transition start =
 boolToBitVector :: KnownNat n => Bool -> BitVector n
 boolToBitVector = resize . pack
 {-# INLINE boolToBitVector #-}
+
+downto :: (Num a, Bits a) => Int -> Int -> a
+downto h l = (1 `shiftL` (h - l + 1) - 1) `shiftL` l
+{-# INLINE downto #-}
+
+bitsDownTo :: (Num a, Bits a) => Int -> Int -> a -> a
+bitsDownTo h l = \w -> w .&. downto h l
+{-# INLINE bitsDownTo #-}

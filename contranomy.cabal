@@ -77,6 +77,7 @@ library
     Contranomy.Clash.Extra
     Contranomy.Core
     Contranomy.Decode
+    Contranomy.Encode
     Contranomy.RV32IM
     Contranomy.RVFI
     Contranomy.WishBone

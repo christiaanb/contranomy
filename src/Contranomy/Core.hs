@@ -7,6 +7,7 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Contranomy.Core (core) where
@@ -28,32 +29,65 @@ data CoreStage
   | Execute
   deriving (Generic, NFDataX, AutoReg)
 
+data MStatus
+  = MStatus
+  { mie :: Bool
+  , mpie :: Bool
+  }
+  deriving (Generic, NFDataX)
+
+deriveAutoReg ''MStatus
+
+data MCause
+  = MCause
+  { interrupt :: Bool
+  , code :: BitVector 4
+  }
+  deriving (Generic, NFDataX)
+
+deriveAutoReg ''MCause
+
 data CoreState
   = CoreState
   { stage :: CoreStage
   , pc :: Unsigned 32
   , instruction :: Instr
-  , registers :: Vec 31 (BitVector 32)
+  , registers :: Vec 34 (BitVector 32)
+  , mstatus :: MStatus
+  , mieMtie :: Bool
+  , mcause :: MCause
   , rvfiInstr :: BitVector 32
   , rvfiOrder :: BitVector 64
   }
   deriving (Generic, NFDataX)
 
+pattern MTVEC_LOCATION, MSCRATCH_LOCATION, MEPC_LOCATION, MTVAL_LOCATION :: Index 34
+pattern MTVEC_LOCATION = 31
+pattern MSCRATCH_LOCATION = 32
+pattern MEPC_LOCATION = 33
+pattern MTVAL_LOCATION = 34
+
 instance AutoReg CoreState where
-  autoReg clk rst ena CoreState{stage,pc,instruction,registers,rvfiInstr,rvfiOrder} = \inp ->
+  autoReg clk rst ena CoreState{stage,pc,instruction,registers,mstatus,mieMtie,mcause,rvfiInstr,rvfiOrder} = \inp ->
     let fld1 = (\CoreState{stage=f} -> f) <$> inp
         fld2 = (\CoreState{pc=f} -> f) <$> inp
         fld3 = (\CoreState{instruction=f} -> f) <$> inp
         fld4 = (\CoreState{registers=f} -> f) <$> inp
-        fld5 = (\CoreState{rvfiInstr=f} -> f) <$> inp
-        fld6 = (\CoreState{rvfiOrder=f} -> f) <$> inp
+        fld5 = (\CoreState{mstatus=f} -> f) <$> inp
+        fld6 = (\CoreState{mieMtie=f} -> f) <$> inp
+        fld7 = (\CoreState{mcause=f} -> f) <$> inp
+        fld8 = (\CoreState{rvfiInstr=f} -> f) <$> inp
+        fld9 = (\CoreState{rvfiOrder=f} -> f) <$> inp
     in  CoreState
            <$> setName @"stage" AutoReg.autoReg clk rst ena stage fld1
            <*> setName @"pc" AutoReg.autoReg clk rst ena pc fld2
            <*> setName @"instruction" AutoReg.autoReg clk rst ena instruction fld3
            <*> setName @"registers" Explicit.register clk rst ena registers fld4
-           <*> setName @"rvfiInstr" AutoReg.autoReg clk rst ena rvfiInstr fld5
-           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld6
+           <*> setName @"mstatus" Explicit.register clk rst ena mstatus fld5
+           <*> setName @"mie_mtie" Explicit.register clk rst ena mieMtie fld6
+           <*> setName @"mcause" Explicit.register clk rst ena mcause fld7
+           <*> setName @"rvfiInstr" AutoReg.autoReg clk rst ena rvfiInstr fld8
+           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld9
   {-# INLINE autoReg #-}
 
 core ::
@@ -72,6 +106,9 @@ core = mealyAutoB transition cpuStart
     , pc = 0
     , instruction = noop
     , registers = deepErrorX "undefined"
+    , mstatus = MStatus { mie = False, mpie = False}
+    , mieMtie = False
+    , mcause = MCause { interrupt = False, code = 0 }
     , rvfiInstr = 0
     , rvfiOrder = 0
     }
@@ -99,7 +136,7 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
       , defM2S
       , defRVFI ) )
 
-transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr, rvfiOrder }) (_,dBusS2M)
+transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, mieMtie, mcause, rvfiInstr, rvfiOrder }) (_,dBusS2M)
   =
   let registers0 = 0 :> registers
 
@@ -110,7 +147,9 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
           ShiftInstr {dest} -> Just dest
           LUI {dest} -> Just dest
           AUIPC {dest} -> Just dest
-        CSRInstr {} -> Nothing -- "Not yet implemented"
+        CSRInstr csrInstr -> case csrInstr of
+          CSRRInstr {dest} -> Just dest
+          CSRIInstr {dest} -> Just dest
         MemoryInstr minstr -> case minstr of
           LOAD {dest} | acknowledge dBusS2M -> Just dest
           _ -> Nothing
@@ -204,6 +243,17 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
             imm20 ++# 0
           AUIPC {imm20} ->
             pack pc + (imm20 ++# 0)
+        CSRInstr csrInstr -> case csr csrInstr of
+          MSTATUS -> shiftL (boolToBitVector (mpie mstatus)) 7 .|.
+                     shiftL (boolToBitVector (mie mstatus)) 3
+          MIE -> shiftL (boolToBitVector mieMtie) 7
+          MTVEC -> registers !! MTVEC_LOCATION
+          MSCRATCH -> registers !! MSCRATCH_LOCATION
+          MEPC -> registers !! MEPC_LOCATION
+          MCAUSE -> pack (interrupt mcause) ++# 0 ++# code mcause
+          MTVAL -> registers !! MTVAL_LOCATION
+          _ -> 0
+
         MemoryInstr minstr -> case minstr of
           LOAD {loadWidth} -> case loadWidth of
             Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
@@ -281,7 +331,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, rvfiInstr
       , toRVFI rvfiInstr
                rvfiOrder
                instruction
-               registers0
+               (take d32 registers0)
                dstReg
                aluResult
                pc

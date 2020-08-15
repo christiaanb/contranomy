@@ -13,3 +13,7 @@ mealyAutoB transition start =
             s      = autoReg start sN
         in  unbundle o
 {-# INLINE mealyAutoB #-}
+
+boolToBitVector :: KnownNat n => Bool -> BitVector n
+boolToBitVector = resize . pack
+{-# INLINE boolToBitVector #-}

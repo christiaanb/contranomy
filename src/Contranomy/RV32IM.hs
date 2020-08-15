@@ -33,10 +33,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Contranomy.RV32IM
   ( Register(..)
-  , CSRRegister(..)
+  , CSRRegister
+      ( MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH
+      , MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2
+      ,.. )
   , Instr(..)
   -- * Integer Register-Immediate Instructions
   , RegisterImmediateInstr(..)
@@ -299,3 +303,26 @@ type Word20 = BitVector 20
 -- which significantly reduces generated Verilog
 deriveDefaultAnnotation [t|Register|]
 deriveBitPack  [t|Register|]
+
+-- Machine Trap Setup
+pattern MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH :: CSRRegister
+
+pattern MSTATUS    = CSRRegister 0x300 -- Machine status register
+pattern MISA       = CSRRegister 0x301 -- ISA and extensions
+pattern MEDELEG    = CSRRegister 0x302 -- Machine exception delegation register
+pattern MIDELEG    = CSRRegister 0x303 -- Machine interrupt delegation register
+pattern MIE        = CSRRegister 0x304 -- Machine interrupt enable register
+pattern MTVEC      = CSRRegister 0x305 -- Machine trap-handler base address
+pattern MCOUNTEREN = CSRRegister 0x306 -- Machine counter enable
+pattern MSTATUSH   = CSRRegister 0x307 -- Additional machine status register, RV32 only
+
+-- Machine Trap Handling
+pattern MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2 :: CSRRegister
+
+pattern MSCRATCH = CSRRegister 0x340 -- Scratch register for machine trap handlers
+pattern MEPC     = CSRRegister 0x341 -- Machine exception program counter
+pattern MCAUSE   = CSRRegister 0x342 -- Machine trap cause
+pattern MTVAL    = CSRRegister 0x343 -- Machine bad address instruction
+pattern MIP      = CSRRegister 0x344 -- Machine interrupt pending
+pattern MTINST   = CSRRegister 0x34A -- Machine trap instruction (transformed)
+pattern MTVAL2   = CSRRegister 0x34B -- Machine bad guest physical address

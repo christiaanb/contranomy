@@ -10,10 +10,12 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Contranomy.Core (core) where
+module Contranomy.Core where
 
 import Data.Maybe
 
+import Clash.Annotations.BitRepresentation
+import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Class.AutoReg as AutoReg
 import Clash.Prelude hiding (cycle, select)
 
@@ -48,12 +50,32 @@ data MCause
 
 deriveAutoReg ''MCause
 
+data InterruptMode
+  = Direct (BitVector 30)
+  | Vectored (BitVector 30)
+  deriving (Generic, NFDataX, AutoReg)
+
+{-# ANN module (DataReprAnn
+                  $(liftQ [t|InterruptMode|])
+                  32
+                  [ ConstrRepr 'Direct   (1 `downto` 0) 0 [31 `downto` 2]
+                  , ConstrRepr 'Vectored (1 `downto` 0) 1 [31 `downto` 2]
+                  ]) #-}
+deriveBitPack [t| InterruptMode |]
+
+interruptAddress ::
+  InterruptMode ->
+  BitVector 4 ->
+  Unsigned 32
+interruptAddress (Direct base) _ = unpack (resize base)
+interruptAddress (Vectored base) cause = unpack (resize base + resize cause * 4)
+
 data MachineState
   = MachineState
   { mstatus :: MStatus
   , mtie :: Bool
   , mcause :: MCause
-  , mtvec :: Word32
+  , mtvec :: InterruptMode
   , mscratch :: Word32
   , mepc :: Word32
   , mtval :: Word32
@@ -98,7 +120,7 @@ core = mealyAutoB transition cpuStart
     { mstatus = MStatus { mie = False, mpie = False }
     , mtie = False
     , mcause = MCause { interrupt = False, code = 0 }
-    , mtvec = 0
+    , mtvec = Direct 0
     , mscratch = 0
     , mepc = 0
     , mtval = 0
@@ -237,7 +259,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               shiftL (boolToBitVector mpie) 7 .|.
               shiftL (boolToBitVector mie) 3
           MIE -> shiftL (boolToBitVector (mtie machineState)) 7
-          MTVEC -> mtvec machineState
+          MTVEC -> pack (mtvec machineState)
           MSCRATCH -> mscratch machineState
           MEPC -> mepc machineState
           MCAUSE -> case mcause machineState of
@@ -279,10 +301,17 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             let arg1 = readRegisterFile registers base
             in  unpack (slice d31 d1 (arg1 + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc
+        EnvironmentInstr einstr -> case einstr
+          ECall  -> interruptAddress (mtvec machineState) 11
+          EBreak -> interruptAddress (mtvec machineState) 3
         _ -> pc+4
 
-      branchTrap = slice d1 d0 pcN0 /= 0
-      pcN1 = if branchTrap then 0 else pcN0
+      addressMisaligned = slice d1 d0 pcN0 /= 0
+      pcN1 =
+        if addressMisaligned then
+          interruptAddress (mtvec machineState) 0
+        else
+          pcN0
 
       dBusM2S = case instruction of
         MemoryInstr minstr -> case minstr of
@@ -320,7 +349,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                aluResult
                pc
                pcN1
-               branchTrap
+               addressMisaligned
                dBusM2S
                dBusS2M
       ) )

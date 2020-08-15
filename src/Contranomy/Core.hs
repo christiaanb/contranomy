@@ -15,12 +15,12 @@ module Contranomy.Core (core) where
 import Data.Maybe
 
 import Clash.Class.AutoReg as AutoReg
-import qualified Clash.Explicit.Prelude as Explicit
 import Clash.Prelude hiding (cycle, select)
 
 import Contranomy.Clash.Extra
 import Contranomy.Decode
 import Contranomy.Encode
+import Contranomy.RegisterFile
 import Contranomy.RV32IM
 import Contranomy.RVFI
 import Contranomy.WishBone
@@ -48,45 +48,31 @@ data MCause
 
 deriveAutoReg ''MCause
 
+data MachineState
+  = MachineState
+  { mstatus :: MStatus
+  , mtie :: Bool
+  , mcause :: MCause
+  , mtvec :: Word32
+  , mscratch :: Word32
+  , mepc :: Word32
+  , mtval :: Word32
+  }
+  deriving (Generic, NFDataX)
+
+deriveAutoReg ''MachineState
+
 data CoreState
   = CoreState
   { stage :: CoreStage
   , pc :: Unsigned 32
   , instruction :: Instr
-  , registers :: Vec 34 (BitVector 32)
-  , mstatus :: MStatus
-  , mieMtie :: Bool
-  , mcause :: MCause
-  , rvfiOrder :: BitVector 64
+  , registers :: RegisterFile
+  , machineState :: MachineState
   }
   deriving (Generic, NFDataX)
 
-pattern MTVEC_LOCATION, MSCRATCH_LOCATION, MEPC_LOCATION, MTVAL_LOCATION :: Index 34
-pattern MTVEC_LOCATION = 31
-pattern MSCRATCH_LOCATION = 32
-pattern MEPC_LOCATION = 33
-pattern MTVAL_LOCATION = 34
-
-instance AutoReg CoreState where
-  autoReg clk rst ena CoreState{stage,pc,instruction,registers,mstatus,mieMtie,mcause,rvfiOrder} = \inp ->
-    let fld1 = (\CoreState{stage=f} -> f) <$> inp
-        fld2 = (\CoreState{pc=f} -> f) <$> inp
-        fld3 = (\CoreState{instruction=f} -> f) <$> inp
-        fld4 = (\CoreState{registers=f} -> f) <$> inp
-        fld5 = (\CoreState{mstatus=f} -> f) <$> inp
-        fld6 = (\CoreState{mieMtie=f} -> f) <$> inp
-        fld7 = (\CoreState{mcause=f} -> f) <$> inp
-        fld8 = (\CoreState{rvfiOrder=f} -> f) <$> inp
-    in  CoreState
-           <$> setName @"stage" AutoReg.autoReg clk rst ena stage fld1
-           <*> setName @"pc" AutoReg.autoReg clk rst ena pc fld2
-           <*> setName @"instruction" AutoReg.autoReg clk rst ena instruction fld3
-           <*> setName @"registers" Explicit.register clk rst ena registers fld4
-           <*> setName @"mstatus" Explicit.register clk rst ena mstatus fld5
-           <*> setName @"mie_mtie" Explicit.register clk rst ena mieMtie fld6
-           <*> setName @"mcause" Explicit.register clk rst ena mcause fld7
-           <*> setName @"rvfiOrder" AutoReg.autoReg clk rst ena rvfiOrder fld8
-  {-# INLINE autoReg #-}
+deriveAutoReg ''CoreState
 
 core ::
   HiddenClockResetEnable dom =>
@@ -103,11 +89,19 @@ core = mealyAutoB transition cpuStart
     { stage = InstructionFetch
     , pc = 0
     , instruction = noop
-    , registers = deepErrorX "undefined"
-    , mstatus = MStatus { mie = False, mpie = False}
-    , mieMtie = False
+    , registers = emptyRegisterFile
+    , machineState = machineStart
+    }
+
+  machineStart
+    = MachineState
+    { mstatus = MStatus { mie = False, mpie = False }
+    , mtie = False
     , mcause = MCause { interrupt = False, code = 0 }
-    , rvfiOrder = 0
+    , mtvec = 0
+    , mscratch = 0
+    , mepc = 0
+    , mtval = 0
     }
 
 transition ::
@@ -132,11 +126,9 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
       , defM2S
       , defRVFI ) )
 
-transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, mieMtie, mcause, rvfiOrder }) (_,dBusS2M)
+transition s@(CoreState { stage = Execute, instruction, pc, registers, machineState }) (_,dBusS2M)
   =
-  let registers0 = 0 :> registers
-
-      dstReg = case instruction of
+  let dstReg = case instruction of
         RRInstr (RInstr {dest}) -> Just dest
         RIInstr iinstr -> case iinstr of
           IInstr {dest} -> Just dest
@@ -156,8 +148,8 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
 
       aluResult = case instruction of
         RRInstr (RInstr {opcode,src1,src2}) ->
-          let arg1 = registers0 !! src1
-              arg2 = registers0 !! src2
+          let arg1 = readRegisterFile registers src1
+              arg2 = readRegisterFile registers src2
               shiftAmount = unpack (resize (slice d4 d0 arg2))
           in case opcode of
             ADD -> arg1 + arg2
@@ -213,7 +205,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
 #endif
         RIInstr iinstr -> case iinstr of
           IInstr {iOpcode,src,imm12} ->
-            let arg1 = registers0 !! src
+            let arg1 = readRegisterFile registers src
                 arg2 = signExtend imm12
             in case iOpcode of
               ADDI -> arg1 + arg2
@@ -229,7 +221,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
               ORI -> arg1 .|. arg2
               ANDI -> arg1 .&. arg2
           ShiftInstr {sOpcode,src,shamt} ->
-            let arg1 = registers0 !! src
+            let arg1 = readRegisterFile registers src
                 shiftAmount = unpack (resize shamt)
             in case sOpcode of
               SLLI -> shiftL arg1 shiftAmount
@@ -240,14 +232,18 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
           AUIPC {imm20} ->
             pack pc + (imm20 ++# 0)
         CSRInstr csrInstr -> case csr csrInstr of
-          MSTATUS -> shiftL (boolToBitVector (mpie mstatus)) 7 .|.
-                     shiftL (boolToBitVector (mie mstatus)) 3
-          MIE -> shiftL (boolToBitVector mieMtie) 7
-          MTVEC -> registers !! MTVEC_LOCATION
-          MSCRATCH -> registers !! MSCRATCH_LOCATION
-          MEPC -> registers !! MEPC_LOCATION
-          MCAUSE -> pack (interrupt mcause) ++# 0 ++# code mcause
-          MTVAL -> registers !! MTVAL_LOCATION
+          MSTATUS -> case mstatus machineState of
+            MStatus {mpie, mie} ->
+              shiftL (boolToBitVector mpie) 7 .|.
+              shiftL (boolToBitVector mie) 3
+          MIE -> shiftL (boolToBitVector (mtie machineState)) 7
+          MTVEC -> mtvec machineState
+          MSCRATCH -> mscratch machineState
+          MEPC -> mepc machineState
+          MCAUSE -> case mcause machineState of
+            MCause {interrupt, code} ->
+              pack interrupt ++# 0 ++# code
+          MTVAL -> mtval machineState
           _ -> 0
 
         MemoryInstr minstr -> case minstr of
@@ -263,8 +259,8 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
 
       pcN0 = case instruction of
         BranchInstr (Branch {imm,cond,src1,src2}) ->
-          let arg1 = registers0 !! src1
-              arg2 = registers0 !! src2
+          let arg1 = readRegisterFile registers src1
+              arg2 = readRegisterFile registers src2
               taken = case cond of
                 BEQ -> arg1 == arg2
                 BNE -> arg1 /= arg2
@@ -280,7 +276,8 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
           JAL {imm} ->
             pc + unpack (signExtend imm `shiftL` 1)
           JALR {offset,base} ->
-            unpack (slice d31 d1 (registers0 !! base + signExtend offset) ++# 0)
+            let arg1 = readRegisterFile registers base
+            in  unpack (slice d31 d1 (arg1 + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc
         _ -> pc+4
 
@@ -291,15 +288,15 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
         MemoryInstr minstr -> case minstr of
           LOAD {loadWidth,offset,base} ->
             (defM2S @4 @32)
-              { addr   = registers0 !! base + signExtend offset
+              { addr   = readRegisterFile registers base + signExtend offset
               , select = loadWidthSelect loadWidth
               , cycle  = True
               , strobe = True
               }
           STORE {width,offset,src,base} ->
             (defM2S @4 @32)
-              { addr = registers0 !! base + signExtend offset
-              , writeData = registers0 !! src
+              { addr = readRegisterFile registers base + signExtend offset
+              , writeData = readRegisterFile registers src
               , select = loadWidthSelect (Width width)
               , cycle = True
               , strobe = True
@@ -313,20 +310,12 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, mstatus, 
               -> Execute
             _ -> InstructionFetch
         , pc = pcN1
-        , registers = case dstReg of
-            Just dst -> tail (replace dst aluResult registers0)
-            Nothing  -> registers
-        , rvfiOrder = case instruction of
-            MemoryInstr {}
-              | not (acknowledge dBusS2M)
-              -> rvfiOrder
-            _ -> rvfiOrder + 1
+        , registers = writeRegisterFile registers ((,) <$> dstReg <*> pure aluResult)
         }
     , ( defM2S
       , dBusM2S
-      , toRVFI rvfiOrder
-               instruction
-               (take d32 registers0)
+      , toRVFI instruction
+               registers
                dstReg
                aluResult
                pc
@@ -346,12 +335,10 @@ loadWidthSelect lw = case lw of
 {-# INLINE loadWidthSelect #-}
 
 toRVFI ::
-  -- | Instruction index
-  BitVector 64 ->
   -- | Current decoded instruction
   Instr ->
   -- | Registers
-  Vec 32 (BitVector 32) ->
+  RegisterFile ->
   -- | Destination register
   Maybe Register ->
   -- | Destination register write data
@@ -367,7 +354,7 @@ toRVFI ::
   -- | Data Bus S2M
   WishBoneS2M 4 ->
   RVFI
-toRVFI rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
+toRVFI instruction registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
   let rs1AddrN = case instruction of
                    BranchInstr (Branch {src1}) -> src1
                    CSRInstr (CSRRInstr {src}) -> src
@@ -388,13 +375,13 @@ toRVFI rOrder instruction registers0 dstReg aluResult pc pcN branchTrap dBusM2S 
         { valid = case instruction of
             MemoryInstr {} -> acknowledge dBusS2M
             _ -> True
-        , order    = rOrder
+        , order    = 0
         , insn     = encodeInstruction instruction
         , trap     = branchTrap
         , rs1Addr  = rs1AddrN
         , rs2Addr  = rs2AddrN
-        , rs1RData = registers0 !! pack rs1AddrN
-        , rs2RData = registers0 !! pack rs2AddrN
+        , rs1RData = readRegisterFile registers rs1AddrN
+        , rs2RData = readRegisterFile registers rs2AddrN
         , rdAddr   = fromMaybe X0 dstReg
           -- Since we take the tail for the written to registers, this is okay
         , rdWData  = case fromMaybe X0 dstReg of

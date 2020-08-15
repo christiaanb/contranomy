@@ -78,6 +78,7 @@ library
     Contranomy.Core
     Contranomy.Decode
     Contranomy.Encode
+    Contranomy.RegisterFile
     Contranomy.RV32IM
     Contranomy.RVFI
     Contranomy.WishBone

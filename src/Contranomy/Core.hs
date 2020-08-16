@@ -76,7 +76,7 @@ data MachineState
   , mcause :: MCause
   , mtvec :: InterruptMode
   , mscratch :: Word32
-  , mepc :: Word32
+  , mepc :: BitVector 30
   , mtval :: Word32
   }
   deriving (Generic, NFDataX)
@@ -260,7 +260,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               shiftL (boolToBitVector mie) 3
           MTVEC -> pack (mtvec machineState)
           MSCRATCH -> mscratch machineState
-          MEPC -> mepc machineState
+          MEPC -> resize (mepc machineState) `shiftL` 2
           MCAUSE -> case mcause machineState of
             MCause {interrupt, code} ->
               pack interrupt ++# 0 ++# code
@@ -303,10 +303,11 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
         EnvironmentInstr einstr -> case einstr of
           ECALL  -> interruptAddress (mtvec machineState) 11
           EBREAK -> interruptAddress (mtvec machineState) 3
-          MRET   -> unpack (mepc machineState)
+          MRET   -> unpack (resize (mepc machineState) `shiftL` 2)
         _ -> pc+4
 
       addressMisaligned = slice d1 d0 pcN0 /= 0
+
       pcN1 =
         if addressMisaligned then
           interruptAddress (mtvec machineState) 0
@@ -321,7 +322,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               , mstatus = MStatus { mpie = mie (mstatus machineState)
                                   , mie  = False
                                   }
-              , mepc = pack pc
+              , mepc = resize (pack pc) `shiftL` 2
               , mcause = MCause { interrupt = False, code = 11 }
               }
           EBREAK ->
@@ -330,7 +331,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               , mstatus = MStatus { mpie = mie (mstatus machineState)
                                   , mie  = False
                                   }
-              , mepc = pack pc
+              , mepc = resize (pack pc) `shiftL` 2
               , mcause = MCause { interrupt = False, code = 3 }
               }
           MRET ->
@@ -350,7 +351,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                 MIE -> undefined
                 MTVEC -> pack (mtvec machineState)
                 MSCRATCH -> mscratch machineState
-                MEPC -> mepc machineState
+                MEPC -> resize (mepc machineState) `shiftL` 2
                 MCAUSE -> case mcause machineState of
                   MCause {interrupt, code} ->
                     pack interrupt ++# 0 ++# code
@@ -367,7 +368,10 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                     }
                 MTVEC ->
                   machineState
-                    { mtvec = unpack (clearBit newValue 1)
+                    { mtvec = case unpack (clearBit newValue 1) of
+                        Direct base | slice d1 d0 base /= 0 -> mtvec machineState
+                        Vectored base | slice d1 d0 base /= 0 -> mtvec machineState
+                        val -> val
                     }
                 MSCRATCH ->
                   machineState
@@ -375,7 +379,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                     }
                 MEPC ->
                   machineState
-                    { mepc = newValue
+                    { mepc = resize (newValue `shiftR` 2)
                     }
                 MCAUSE ->
                   machineState
@@ -396,7 +400,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               , mstatus = MStatus { mpie = mie (mstatus machineState)
                                   , mie  = False
                                   }
-              , mepc = pack pc
+              , mepc = pack (resize (pc `shiftR` 2))
               , mcause = MCause { interrupt = False, code = 0 }
               }
           else

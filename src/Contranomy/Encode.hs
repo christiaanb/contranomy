@@ -188,14 +188,14 @@ encodeRegisterRegisterInstr (RInstr opcode src2 src1 dest) =
       case opcode of
         SUB -> 0b0100000
         SRA -> 0b0100000
-        MUL -> 0b0000010
-        MULH -> 0b0000010
-        MULHSU -> 0b0000010
-        MULHU -> 0b0000010
-        DIV -> 0b0000010
-        DIVU -> 0b0000010
-        REM -> 0b0000010
-        REMU -> 0b0000010
+        MUL -> 0b0000001
+        MULH -> 0b0000001
+        MULHSU -> 0b0000001
+        MULHU -> 0b0000001
+        DIV -> 0b0000001
+        DIVU -> 0b0000001
+        REM -> 0b0000001
+        REMU -> 0b0000001
         _ -> 0
 
 encodeIOpcode :: IOpcode -> Word32

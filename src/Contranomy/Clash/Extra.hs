@@ -10,7 +10,7 @@ mealyAutoB ::
   (Unbundled dom i -> Unbundled dom o)
 mealyAutoB transition start =
   \i -> let (sN,o) = unbundle (transition <$> s <*> (bundle i))
-            s      = autoReg start sN
+            s      = setName @"core" autoReg start sN
         in  unbundle o
 {-# INLINE mealyAutoB #-}
 

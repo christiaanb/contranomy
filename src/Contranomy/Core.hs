@@ -51,8 +51,8 @@ data MCause
 deriveAutoReg ''MCause
 
 data InterruptMode
-  = Direct (BitVector 30)
-  | Vectored (BitVector 30)
+  = Direct {trapBase :: (BitVector 30)}
+  | Vectored {trapBase :: (BitVector 30)}
   deriving (Generic, NFDataX, AutoReg)
 
 {-# ANN module (DataReprAnn
@@ -62,13 +62,6 @@ data InterruptMode
                   , ConstrRepr 'Vectored (1 `downto` 0) 1 [31 `downto` 2]
                   ]) #-}
 deriveBitPack [t| InterruptMode |]
-
-interruptAddress ::
-  InterruptMode ->
-  BitVector 4 ->
-  Unsigned 32
-interruptAddress (Direct base) _ = unpack (resize base)
-interruptAddress (Vectored base) cause = unpack (resize base + resize cause * 4)
 
 data MachineState
   = MachineState
@@ -301,18 +294,34 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             in  unpack (slice d31 d1 (arg1 + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc
         EnvironmentInstr einstr -> case einstr of
-          ECALL  -> interruptAddress (mtvec machineState) 11
-          EBREAK -> interruptAddress (mtvec machineState) 3
+          ECALL  -> 1
+          EBREAK -> 1
           MRET   -> unpack (resize (mepc machineState) `shiftL` 2)
         _ -> pc+4
 
-      addressMisaligned = slice d1 d0 pcN0 /= 0
+      ctrlAddrMisaligned = slice d1 d0 pcN0 /= 0
 
-      pcN1 =
-        if addressMisaligned then
-          interruptAddress (mtvec machineState) 0
-        else
-          pcN0
+      loadAddres = case instruction of
+        MemoryInstr (LOAD {offset,base}) ->
+          readRegisterFile registers base + signExtend offset
+        _ -> 0
+
+      loadAddrMisaligned = slice d1 d0 loadAddres /= 0
+
+      storeAddress = case instruction of
+        MemoryInstr (STORE {base,offset}) ->
+          readRegisterFile registers base + signExtend offset
+        _ -> 0
+
+      storeAddressMisaligned = slice d1 d0 storeAddress /= 0
+
+      trap = ctrlAddrMisaligned || loadAddrMisaligned || storeAddressMisaligned
+
+      pcN1
+        | trap
+        = unpack (zeroExtend (trapBase (mtvec machineState)))
+        | otherwise
+        = pcN0
 
       machineStateN = case instruction of
         EnvironmentInstr einstr -> case einstr of
@@ -394,31 +403,45 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                 _ ->
                   machineState
         _ ->
-          if addressMisaligned then
+          if trap then
             machineState
-              { mtval = pack pcN0
+              { mtval =
+                  if loadAddrMisaligned then
+                    loadAddres
+                  else if storeAddressMisaligned then
+                    storeAddress
+                  else
+                    pack pcN0
+
               , mstatus = MStatus { mpie = mie (mstatus machineState)
                                   , mie  = False
                                   }
               , mepc = pack (resize (pc `shiftR` 2))
-              , mcause = MCause { interrupt = False, code = 0 }
+              , mcause = MCause { interrupt = False
+                                , code =
+                                    if loadAddrMisaligned then
+                                      4
+                                    else if storeAddressMisaligned then
+                                      6
+                                    else
+                                      0
+                                }
               }
           else
             machineState
 
       dBusM2S = case instruction of
-        MemoryInstr minstr -> case minstr of
-          LOAD {loadWidth,offset,base} ->
+        MemoryInstr minstr | trap -> case minstr of
+          LOAD {loadWidth} ->
             (defM2S @4 @32)
-              { addr   = readRegisterFile registers base + signExtend offset
+              { addr   = loadAddres
               , select = loadWidthSelect loadWidth
               , cycle  = True
               , strobe = True
               }
-          STORE {width,offset,src,base} ->
+          STORE {width,src} ->
             (defM2S @4 @32)
-              { addr = readRegisterFile registers base + signExtend offset
-              , writeData = readRegisterFile registers src
+              { writeData = readRegisterFile registers src
               , select = loadWidthSelect (Width width)
               , cycle = True
               , strobe = True
@@ -428,7 +451,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
   in
     ( s { stage = case instruction of
             MemoryInstr {}
-              | not (acknowledge dBusS2M)
+              | not (trap || acknowledge dBusS2M)
               -> Execute
             _ -> InstructionFetch
         , pc = pcN1
@@ -436,7 +459,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
         , machineState = machineStateN
         , rvfiOrder = case instruction of
             MemoryInstr {}
-              | not (acknowledge dBusS2M)
+              | not (trap || acknowledge dBusS2M)
               -> rvfiOrder
             _ -> rvfiOrder + 1
         }
@@ -449,7 +472,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                aluResult
                pc
                pcN1
-               addressMisaligned
+               trap
                dBusM2S
                dBusS2M
       ) )
@@ -504,7 +527,7 @@ toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN branchTrap dBusM2
                    _ -> X0
   in  defRVFI
         { valid = case instruction of
-            MemoryInstr {} -> acknowledge dBusS2M
+            MemoryInstr {} | not trap -> acknowledge dBusS2M
             _ -> True
         , order    = rvfiOrder
         , insn     = encodeInstruction instruction

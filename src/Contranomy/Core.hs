@@ -79,7 +79,7 @@ deriveAutoReg ''MachineState
 data CoreState
   = CoreState
   { stage :: CoreStage
-  , pc :: Unsigned 32
+  , pc :: BitVector 30
   , instruction :: Instr
   , registers :: RegisterFile
   , machineState :: MachineState
@@ -94,7 +94,7 @@ core ::
   ( Signal dom (WishBoneS2M 4)
   , Signal dom (WishBoneS2M 4) ) ->
   ( Signal dom (WishBoneM2S 4 30)
-  , Signal dom (WishBoneM2S 4 32)
+  , Signal dom (WishBoneM2S 4 30)
   , Signal dom RVFI
   )
 core = mealyAutoB transition cpuStart
@@ -124,7 +124,7 @@ transition ::
   ( WishBoneS2M 4, WishBoneS2M 4 ) ->
   ( CoreState
   , ( WishBoneM2S 4 30
-    , WishBoneM2S 4 32
+    , WishBoneM2S 4 30
     , RVFI ))
 transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
   = ( s { stage = if acknowledge iBus then
@@ -134,7 +134,7 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
         , instruction = decodeInstruction (readData iBus)
         }
     , ( (defM2S @4 @30)
-               { addr   = slice d31 d2 pc
+               { addr   = pc
                , cycle  = True
                , strobe = True
                }
@@ -245,7 +245,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           LUI {imm20} ->
             imm20 ++# 0
           AUIPC {imm20} ->
-            pack pc + (imm20 ++# 0)
+            (pc ++# 0) + (imm20 ++# 0)
         CSRInstr csrInstr -> case csr csrInstr of
           MSTATUS -> case mstatus machineState of
             MStatus {mpie, mie} ->
@@ -261,17 +261,19 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           _ -> 0
 
         MemoryInstr minstr -> case minstr of
-          LOAD {loadWidth} -> case loadWidth of
-            Width Byte -> signExtend (slice d7 d0 (readData dBusS2M))
-            Width Half -> signExtend (slice d15 d0 (readData dBusS2M))
-            HalfUnsigned -> zeroExtend (slice d15 d0 (readData dBusS2M))
-            ByteUnsigned -> zeroExtend (slice d7 d0 (readData dBusS2M))
-            _ -> readData dBusS2M
+          LOAD {loadWidth} ->
+            let alignedRData = readData dBusS2M `shiftR` (fromEnum loadAlign * 8)
+            in  case loadWidth of
+                  Width Byte -> signExtend (slice d7 d0 alignedRData)
+                  Width Half -> signExtend (slice d15 d0 alignedRData)
+                  HalfUnsigned -> zeroExtend (slice d15 d0 alignedRData)
+                  ByteUnsigned -> zeroExtend (slice d7 d0 alignedRData)
+                  _ -> alignedRData
           _ -> 0
-        JumpInstr {} -> pack (pc + 4)
+        JumpInstr {} -> (pc + 1) ++# 0
         _ -> 0
 
-      pcN0 = case instruction of
+      (pcN0,pcTrap) = case instruction of
         BranchInstr (Branch {imm,cond,src1,src2}) ->
           let arg1 = readRegisterFile registers src1
               arg2 = readRegisterFile registers src2
@@ -283,39 +285,55 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
                 BGE -> (unpack arg1 :: Signed 32) >= unpack arg2
                 BGEU -> arg1 >= arg2
           in if taken then
-               pc + unpack (signExtend imm `shiftL` 1)
+               let (offset,align) = split (signExtend imm `shiftL` 1 :: Word32)
+               in  (pc + offset,align /= 0)
              else
-               pc + 4
+               (pc + 1,False)
         JumpInstr jinstr -> case jinstr of
           JAL {imm} ->
-            pc + unpack (signExtend imm `shiftL` 1)
+            let (pcOffset,align) = split (signExtend imm `shiftL` 1 :: Word32)
+            in  (pc + pcOffset,align /=0)
           JALR {offset,base} ->
             let arg1 = readRegisterFile registers base
-            in  unpack (slice d31 d1 (arg1 + signExtend offset) ++# 0)
-        MemoryInstr {} | not (acknowledge dBusS2M) -> pc
+                (pcN,align) = split (arg1 + signExtend offset)
+            in  (pcN,testBit align 1)
+        MemoryInstr {} | not (acknowledge dBusS2M) ->
+          (pc,False)
         EnvironmentInstr einstr -> case einstr of
-          ECALL  -> 1
-          EBREAK -> 1
-          MRET   -> unpack (resize (mepc machineState) `shiftL` 2)
-        _ -> pc+4
+          ECALL  -> (pc,True)
+          EBREAK -> (pc,True)
+          MRET   -> (mepc machineState,False)
+        _ -> (pc+1,False)
 
-      ctrlAddrMisaligned = slice d1 d0 pcN0 /= 0
+      (loadAddres,loadMask,loadAlign,loadTrap) = case instruction of
+        MemoryInstr (LOAD {offset,base,loadWidth}) ->
+          let addr = readRegisterFile registers base + signExtend offset
+              align = slice d1 d0 addr
+              mask = loadWidthSelect loadWidth
+              trapped = case mask of
+                          0b1111 -> align /= 0
+                          0b0011 -> testBit align 0
+                          _      -> False
+          in  (addr,mask `shiftL` fromEnum align,align,trapped)
+        _ -> (0,0,0,False)
 
-      loadAddres = case instruction of
-        MemoryInstr (LOAD {offset,base}) ->
-          readRegisterFile registers base + signExtend offset
-        _ -> 0
+      (storeAddress,storeMask,storeWData,storeTrap) = case instruction of
+        MemoryInstr (STORE {base,offset,width,src}) ->
+          let addr = readRegisterFile registers base + signExtend offset
+              align = slice d1 d0 addr
+              mask = loadWidthSelect (Width width)
+              wdata = readRegisterFile registers src
+              trapped = case width of
+                          Word -> align /= 0
+                          Half -> testBit align 0
+                          Byte -> False
+          in  ( addr
+              , mask `shiftL` fromEnum align
+              , wdata `shiftL` (fromEnum align * 8)
+              , trapped )
+        _ -> (0,0,0,False)
 
-      loadAddrMisaligned = slice d1 d0 loadAddres /= 0
-
-      storeAddress = case instruction of
-        MemoryInstr (STORE {base,offset}) ->
-          readRegisterFile registers base + signExtend offset
-        _ -> 0
-
-      storeAddressMisaligned = slice d1 d0 storeAddress /= 0
-
-      trap = ctrlAddrMisaligned || loadAddrMisaligned || storeAddressMisaligned
+      trap = pcTrap || loadTrap || storeTrap
 
       pcN1
         | trap
@@ -406,22 +424,22 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           if trap then
             machineState
               { mtval =
-                  if loadAddrMisaligned then
+                  if loadTrap then
                     loadAddres
-                  else if storeAddressMisaligned then
+                  else if storeTrap then
                     storeAddress
                   else
-                    pack pcN0
+                    pcN0 ++# 0
 
               , mstatus = MStatus { mpie = mie (mstatus machineState)
                                   , mie  = False
                                   }
-              , mepc = pack (resize (pc `shiftR` 2))
+              , mepc = pc
               , mcause = MCause { interrupt = False
                                 , code =
-                                    if loadAddrMisaligned then
+                                    if loadTrap then
                                       4
-                                    else if storeAddressMisaligned then
+                                    else if storeTrap then
                                       6
                                     else
                                       0
@@ -431,20 +449,21 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             machineState
 
       dBusM2S = case instruction of
-        MemoryInstr minstr | trap -> case minstr of
-          LOAD {loadWidth} ->
-            (defM2S @4 @32)
-              { addr   = loadAddres
-              , select = loadWidthSelect loadWidth
+        MemoryInstr minstr | not trap -> case minstr of
+          LOAD {} ->
+            (defM2S @4 @30)
+              { addr   = slice d31 d2 loadAddres
+              , select = loadMask
               , cycle  = True
               , strobe = True
               }
-          STORE {width,src} ->
-            (defM2S @4 @32)
-              { writeData = readRegisterFile registers src
-              , select = loadWidthSelect (Width width)
-              , cycle = True
-              , strobe = True
+          STORE {} ->
+            (defM2S @4 @30)
+              { addr        = slice d31 d2 storeAddress
+              , writeData   = storeWData
+              , select      = storeMask
+              , cycle       = True
+              , strobe      = True
               , writeEnable = True
               }
         _ -> defM2S
@@ -498,17 +517,17 @@ toRVFI ::
   -- | Destination register write data
   BitVector 32 ->
   -- | Current PC
-  Unsigned 32 ->
+  BitVector 30 ->
   -- | Next PC
-  Unsigned 32 ->
+  BitVector 30 ->
   -- | Trap
   Bool ->
   -- | Data Bus M2S
-  WishBoneM2S 4 32 ->
+  WishBoneM2S 4 30 ->
   -- | Data Bus S2M
   WishBoneS2M 4 ->
   RVFI
-toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
+toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN trap dBusM2S dBusS2M =
   let rs1AddrN = case instruction of
                    BranchInstr (Branch {src1}) -> src1
                    CSRInstr (CSRRInstr {src}) -> src
@@ -531,7 +550,7 @@ toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN branchTrap dBusM2
             _ -> True
         , order    = rvfiOrder
         , insn     = encodeInstruction instruction
-        , trap     = branchTrap
+        , trap     = trap
         , rs1Addr  = rs1AddrN
         , rs2Addr  = rs2AddrN
         , rs1RData = readRegisterFile registers rs1AddrN
@@ -541,9 +560,9 @@ toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN branchTrap dBusM2
         , rdWData  = case fromMaybe X0 dstReg of
                        X0 -> 0
                        _ -> aluResult
-        , pcRData  = pc
-        , pcWData  = pcN
-        , memAddr  = addr dBusM2S
+        , pcRData  = pc ++# 0
+        , pcWData  = pcN ++# 0
+        , memAddr  = if trap then 0 else addr dBusM2S ++# 0
         , memRMask = if strobe dBusM2S && not (writeEnable dBusM2S) then
                        select dBusM2S
                      else

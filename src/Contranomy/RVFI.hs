@@ -20,14 +20,15 @@ data RVFI
   , rs2RData :: "rvfi_rs2_rdata" ::: BitVector 32
   , rdAddr   :: "rvfi_rd_addr"   ::: Register
   , rdWData  :: "rvfi_rd_wdata"  ::: BitVector 32
-  , pcRData  :: "rvfi_pc_rdata"  ::: Unsigned 32
-  , pcWData  :: "rvfi_pc_wdata"  ::: Unsigned 32
+  , pcRData  :: "rvfi_pc_rdata"  ::: BitVector 32
+  , pcWData  :: "rvfi_pc_wdata"  ::: BitVector 32
   , memAddr  :: "rvfi_mem_addr"  ::: BitVector 32
   , memRMask :: "rvfi_mem_rmask" ::: BitVector 4
   , memWMask :: "rvfi_mem_wmask" ::: BitVector 4
   , memRData :: "rvfi_mem_rdata" ::: BitVector 32
   , memWData :: "rvfi_mem_wdata" ::: BitVector 32
   }
+  deriving Show
 
 defRVFI :: RVFI
 defRVFI

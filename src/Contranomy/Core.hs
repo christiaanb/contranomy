@@ -339,9 +339,10 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
               }
         CSRInstr csrInstr ->
           let writeValue = case csrInstr of
-                CSRRInstr {src} | src /= X0 -> Just (readRegisterFile registers src)
-                CSRIInstr {imm} | imm /= 0 -> Just (zeroExtend imm)
-                _ -> Nothing
+                CSRRInstr {src=X0} -> Nothing
+                CSRRInstr {src} -> Just (readRegisterFile registers src)
+                CSRIInstr {imm=0} -> Nothing
+                CSRIInstr {imm} -> Just (zeroExtend imm)
 
               oldValue = case csr csrInstr of
                 MIE -> undefined

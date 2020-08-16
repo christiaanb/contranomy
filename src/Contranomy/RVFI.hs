@@ -7,7 +7,7 @@ import Contranomy.RV32IM
 data RVFI
   = RVFI
   { valid    :: "rvfi_valid"     ::: Bool
-  , order    :: "rvfi_order"     ::: BitVector 64
+  , order    :: "rvfi_order"     ::: Unsigned 64
   , insn     :: "rvfi_insn"      ::: BitVector 32
   , trap     :: "rvfi_trap"      ::: Bool
   , halt     :: "rvfi_halt"      ::: Bool

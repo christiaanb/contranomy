@@ -90,6 +90,7 @@ data CoreState
   , instruction :: Instr
   , registers :: RegisterFile
   , machineState :: MachineState
+  , rvfiOrder :: Unsigned 64
   }
   deriving (Generic, NFDataX)
 
@@ -112,6 +113,7 @@ core = mealyAutoB transition cpuStart
     , instruction = noop
     , registers = emptyRegisterFile
     , machineState = machineStart
+    , rvfiOrder = 0
     }
 
   machineStart
@@ -146,7 +148,7 @@ transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
       , defM2S
       , defRVFI ) )
 
-transition s@(CoreState { stage = Execute, instruction, pc, registers, machineState }) (_,dBusS2M)
+transition s@(CoreState { stage = Execute, instruction, pc, registers, machineState, rvfiOrder }) (_,dBusS2M)
   =
   let dstReg = case instruction of
         RRInstr (RInstr {dest}) -> Just dest
@@ -428,10 +430,16 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
         , pc = pcN1
         , registers = writeRegisterFile registers ((,) <$> dstReg <*> pure aluResult)
         , machineState = machineStateN
+        , rvfiOrder = case instruction of
+            MemoryInstr {}
+              | not (acknowledge dBusS2M)
+              -> rvfiOrder
+            _ -> rvfiOrder + 1
         }
     , ( defM2S
       , dBusM2S
       , toRVFI instruction
+               rvfiOrder
                registers
                dstReg
                aluResult
@@ -454,6 +462,8 @@ loadWidthSelect lw = case lw of
 toRVFI ::
   -- | Current decoded instruction
   Instr ->
+  -- | Order
+  Unsigned 64 ->
   -- | Registers
   RegisterFile ->
   -- | Destination register
@@ -471,7 +481,7 @@ toRVFI ::
   -- | Data Bus S2M
   WishBoneS2M 4 ->
   RVFI
-toRVFI instruction registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
+toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M =
   let rs1AddrN = case instruction of
                    BranchInstr (Branch {src1}) -> src1
                    CSRInstr (CSRRInstr {src}) -> src
@@ -492,7 +502,7 @@ toRVFI instruction registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M 
         { valid = case instruction of
             MemoryInstr {} -> acknowledge dBusS2M
             _ -> True
-        , order    = 0
+        , order    = rvfiOrder
         , insn     = encodeInstruction instruction
         , trap     = branchTrap
         , rs1Addr  = rs1AddrN

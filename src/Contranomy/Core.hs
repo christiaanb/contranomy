@@ -73,7 +73,6 @@ interruptAddress (Vectored base) cause = unpack (resize base + resize cause * 4)
 data MachineState
   = MachineState
   { mstatus :: MStatus
-  , mtie :: Bool
   , mcause :: MCause
   , mtvec :: InterruptMode
   , mscratch :: Word32
@@ -118,7 +117,6 @@ core = mealyAutoB transition cpuStart
   machineStart
     = MachineState
     { mstatus = MStatus { mie = False, mpie = False }
-    , mtie = False
     , mcause = MCause { interrupt = False, code = 0 }
     , mtvec = Direct 0
     , mscratch = 0
@@ -258,7 +256,6 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             MStatus {mpie, mie} ->
               shiftL (boolToBitVector mpie) 7 .|.
               shiftL (boolToBitVector mie) 3
-          MIE -> shiftL (boolToBitVector (mtie machineState)) 7
           MTVEC -> pack (mtvec machineState)
           MSCRATCH -> mscratch machineState
           MEPC -> mepc machineState
@@ -301,9 +298,9 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             let arg1 = readRegisterFile registers base
             in  unpack (slice d31 d1 (arg1 + signExtend offset) ++# 0)
         MemoryInstr {} | not (acknowledge dBusS2M) -> pc
-        EnvironmentInstr einstr -> case einstr
-          ECall  -> interruptAddress (mtvec machineState) 11
-          EBreak -> interruptAddress (mtvec machineState) 3
+        EnvironmentInstr einstr -> case einstr of
+          ECALL  -> interruptAddress (mtvec machineState) 11
+          EBREAK -> interruptAddress (mtvec machineState) 3
         _ -> pc+4
 
       addressMisaligned = slice d1 d0 pcN0 /= 0
@@ -312,6 +309,69 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           interruptAddress (mtvec machineState) 0
         else
           pcN0
+
+      machineStateN = case instruction of
+        CSRInstr csrInstr ->
+          let writeValue = case csrInstr of
+                CSRRInstr {src} | src /= X0 -> Just (readRegisterFile registers src)
+                CSRIInstr {imm} | imm /= 0 -> Just (zeroExtend imm)
+                _ -> Nothing
+
+              oldValue = case csr csrInstr of
+                MIE -> undefined
+                MTVEC -> pack (mtvec machineState)
+                MSCRATCH -> mscratch machineState
+                MEPC -> mepc machineState
+                MCAUSE -> case mcause machineState of
+                  MCause {interrupt, code} ->
+                    pack interrupt ++# 0 ++# code
+                MTVAL -> mtval machineState
+                _ -> 0
+
+              newValue = csrWrite (csrType csrInstr) oldValue writeValue
+          in  case csr csrInstr of
+                MSTATUS ->
+                  machineState
+                    { mstatus = MStatus { mpie = testBit newValue 7
+                                        , mie  = testBit newValue 3
+                                        }
+                    }
+                MTVEC ->
+                  machineState
+                    { mtvec = unpack (clearBit newValue 1)
+                    }
+                MSCRATCH ->
+                  machineState
+                    { mscratch = newValue
+                    }
+                MEPC ->
+                  machineState
+                    { mepc = newValue
+                    }
+                MCAUSE ->
+                  machineState
+                    { mcause = MCause { interrupt = testBit newValue 31
+                                      , code      = truncateB newValue
+                                      }
+                    }
+                MTVAL ->
+                  machineState
+                    { mtval = newValue
+                    }
+                _ ->
+                  machineState
+        _ ->
+          if addressMisaligned then
+            machineState
+              { mtval = pack pcN0
+              , mstatus = MStatus { mpie = mie (mstatus machineState)
+                                  , mie  = False
+                                  }
+              , mepc = pack pc
+              , mcause = MCause { interrupt = False, code = 0 }
+              }
+          else
+            machineState
 
       dBusM2S = case instruction of
         MemoryInstr minstr -> case minstr of
@@ -340,6 +400,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
             _ -> InstructionFetch
         , pc = pcN1
         , registers = writeRegisterFile registers ((,) <$> dstReg <*> pure aluResult)
+        , machineState = machineStateN
         }
     , ( defM2S
       , dBusM2S
@@ -436,3 +497,17 @@ toRVFI instruction registers dstReg aluResult pc pcN branchTrap dBusM2S dBusS2M 
                      else
                        0
         }
+
+csrWrite ::
+  CSRType ->
+  Word32 ->
+  Maybe Word32 ->
+  Word32
+csrWrite ReadWrite oldValue Nothing = oldValue
+csrWrite ReadWrite _ (Just newValue) = newValue
+
+csrWrite ReadSet oldValue Nothing = oldValue
+csrWrite ReadSet oldValue (Just newValue) = oldValue .|. newValue
+
+csrWrite ReadClear oldValue Nothing = oldValue
+csrWrite ReadClear oldValue (Just newValue) = oldValue .&. newValue

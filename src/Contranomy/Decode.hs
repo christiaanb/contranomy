@@ -91,10 +91,11 @@ decodeCSROrEnvInstr word = case slice d14 d12 word of
   _ -> CSRInstr <$> decodeCSRInstr word
 
 decodeEnvInstr :: BitVector 32 -> Maybe EnvironmentInstr
-decodeEnvInstr word =
-  if testBit word 20
-    then pure EBREAK
-    else pure ECALL
+decodeEnvInstr word = case slice d31 d20 word of
+  0 -> pure ECALL
+  1 -> pure EBREAK
+  0b001100000010 -> pure MRET
+  _ -> Nothing
 
 decodeCSRType :: BitVector 2 -> Maybe CSRType
 decodeCSRType twoBits = case twoBits of

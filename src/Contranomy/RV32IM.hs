@@ -223,6 +223,7 @@ data SynchronizationInstr
 data EnvironmentInstr
   = ECALL
   | EBREAK
+  | MRET
   deriving (Show, Eq, Ord, Generic, NFDataX)
 
 -- | Control and status register instruction type

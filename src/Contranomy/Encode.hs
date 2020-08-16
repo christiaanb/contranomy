@@ -107,6 +107,7 @@ encodeCSRInstr (CSRIInstr csrType (CSRRegister csr) immediate dest) =
 encodeEnvInstr :: EnvironmentInstr -> Word32
 encodeEnvInstr ECALL = 0b1110011
 encodeEnvInstr EBREAK = setBit 0b1110011 20
+encodeEnvInstr MRET = 0b001100000010 `shiftL` 20 .|. 0b1110011
 
 encodeJumpInstr :: JumpInstr -> Word32
 encodeJumpInstr (JAL offset dest) =

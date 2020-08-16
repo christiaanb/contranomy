@@ -301,6 +301,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
         EnvironmentInstr einstr -> case einstr of
           ECALL  -> interruptAddress (mtvec machineState) 11
           EBREAK -> interruptAddress (mtvec machineState) 3
+          MRET   -> unpack (mepc machineState)
         _ -> pc+4
 
       addressMisaligned = slice d1 d0 pcN0 /= 0
@@ -311,6 +312,31 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           pcN0
 
       machineStateN = case instruction of
+        EnvironmentInstr einstr -> case einstr of
+          ECALL ->
+            machineState
+              { mtval = 0
+              , mstatus = MStatus { mpie = mie (mstatus machineState)
+                                  , mie  = False
+                                  }
+              , mepc = pack pc
+              , mcause = MCause { interrupt = False, code = 11 }
+              }
+          EBREAK ->
+            machineState
+              { mtval = 0
+              , mstatus = MStatus { mpie = mie (mstatus machineState)
+                                  , mie  = False
+                                  }
+              , mepc = pack pc
+              , mcause = MCause { interrupt = False, code = 3 }
+              }
+          MRET ->
+            machineState
+              { mstatus = MStatus { mpie = True
+                                  , mie  = mpie (mstatus (machineState))
+                                  }
+              }
         CSRInstr csrInstr ->
           let writeValue = case csrInstr of
                 CSRRInstr {src} | src /= X0 -> Just (readRegisterFile registers src)

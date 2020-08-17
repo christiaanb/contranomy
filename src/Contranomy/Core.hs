@@ -337,7 +337,7 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
 
       pcN1
         | trap
-        = unpack (zeroExtend (trapBase (mtvec machineState)))
+        = zeroExtend (slice d29 d2 (trapBase (mtvec machineState)))
         | otherwise
         = pcN0
 

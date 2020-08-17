@@ -58,13 +58,12 @@ pattern Beat16Burst = BurstTypeExtension 3
 
 defM2S ::
   forall bytes addressWidth .
-  (KnownNat bytes, KnownNat addressWidth) =>
   WishBoneM2S bytes addressWidth
 defM2S
   = WishBoneM2S
-  { addr = 0
-  , writeData = 0
-  , select = maxBound
+  { addr = undefined
+  , writeData = undefined
+  , select = undefined
   , cycle = False
   , strobe = False
   , writeEnable = False

@@ -451,14 +451,14 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
       dBusM2S = case instruction of
         MemoryInstr minstr | not trap -> case minstr of
           LOAD {} ->
-            (defM2S @4 @30)
+            defM2S
               { addr   = slice d31 d2 loadAddres
               , select = loadMask
               , cycle  = True
               , strobe = True
               }
           STORE {} ->
-            (defM2S @4 @30)
+            defM2S
               { addr        = slice d31 d2 storeAddress
               , writeData   = storeWData
               , select      = storeMask

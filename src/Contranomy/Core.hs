@@ -154,9 +154,9 @@ transition s@(CoreState { stage = Execute, instruction, pc, registers, machineSt
           CSRRInstr {dest} -> Just dest
           CSRIInstr {dest} -> Just dest
         MemoryInstr minstr -> case minstr of
-          LOAD {dest} | acknowledge dBusS2M -> Just dest
+          LOAD {dest} | not loadTrap && acknowledge dBusS2M -> Just dest
           _ -> Nothing
-        JumpInstr jinstr -> case jinstr of
+        JumpInstr jinstr | not pcTrap -> case jinstr of
           JAL {dest} -> Just dest
           JALR {dest} -> Just dest
         _ -> Nothing

@@ -4,14 +4,19 @@ License    :  BSD2 (see the file LICENSE)
 Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 -}
 
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Contranomy.Core where
 
+import Control.Lens
+import Data.Generics.Labels ()
 import Data.Maybe
 
 import Clash.Annotations.BitRepresentation
@@ -20,16 +25,19 @@ import Clash.Class.AutoReg as AutoReg
 import Clash.Prelude hiding (cycle, select)
 
 import Contranomy.Clash.Extra
-import Contranomy.Decode
-import Contranomy.Encode
+-- import Contranomy.Decode
+-- import Contranomy.Encode
+import Contranomy.Instruction
 import Contranomy.RegisterFile
-import Contranomy.RV32IM
+-- import Contranomy.RV32IM
 import Contranomy.RVFI
 import Contranomy.WishBone
 
+type PC = BitVector 30
+
 data CoreStage
   = InstructionFetch
-  | Execute
+  | Execute Bool
   deriving (Generic, NFDataX, AutoReg)
 
 data MStatus
@@ -40,15 +48,6 @@ data MStatus
   deriving (Generic, NFDataX)
 
 deriveAutoReg ''MStatus
-
-data MCause
-  = MCause
-  { interrupt :: Bool
-  , code :: BitVector 4
-  }
-  deriving (Generic, NFDataX)
-
-deriveAutoReg ''MCause
 
 data InterruptMode
   = Direct {trapBase :: (BitVector 30)}
@@ -63,14 +62,25 @@ data InterruptMode
                   ]) #-}
 deriveBitPack [t| InterruptMode |]
 
+data Mie
+  = Mie
+  { meie :: Bool
+  , mtie :: Bool
+  , msie :: Bool
+  }
+  deriving (Generic, NFDataX)
+
+deriveAutoReg ''Mie
+
 data MachineState
   = MachineState
   { mstatus :: MStatus
   , mcause :: MCause
   , mtvec :: InterruptMode
-  , mscratch :: Word32
-  , mepc :: BitVector 30
-  , mtval :: Word32
+  , mie :: Mie
+  , mscratch :: MachineWord
+  , mepc :: PC
+  , mtval :: MachineWord
   }
   deriving (Generic, NFDataX)
 
@@ -79,8 +89,8 @@ deriveAutoReg ''MachineState
 data CoreState
   = CoreState
   { stage :: CoreStage
-  , pc :: BitVector 30
-  , instruction :: Instr
+  , pc :: PC
+  , instruction :: MachineWord
   , registers :: RegisterFile
   , machineState :: MachineState
   , rvfiOrder :: Unsigned 64
@@ -89,21 +99,40 @@ data CoreState
 
 deriveAutoReg ''CoreState
 
+type TimerInterrupt = Bool
+type SoftwareInterrupt = Bool
+type ExternalInterrupt = MachineWord
+
+data CoreIn
+  = CoreIn
+  { iBusS2M :: "iBusWishbone" ::: WishBoneS2M 4
+  , dBusS2M :: "dBusWishbone" :::  WishBoneS2M 4
+  , timerInterrupt :: "timerInterrupt" ::: TimerInterrupt
+  , softwareInterrupt :: "softwareInterrupt" ::: SoftwareInterrupt
+  , externalInterrupt :: "externalInterrupt" ::: ExternalInterrupt
+  }
+
+data CoreOut
+  = CoreOut
+  { iBusM2S :: "iBusWishbone" ::: WishBoneM2S 4 30
+  , dBusM2S :: "dBusWishbone" ::: WishBoneM2S 4 30
+  , rvfi :: "" ::: RVFI
+  }
+
+defCoreOut :: CoreOut
+defCoreOut = CoreOut { iBusM2S = defM2S, dBusM2S = defM2S, rvfi = defRVFI }
+
 core ::
   HiddenClockResetEnable dom =>
-  ( Signal dom (WishBoneS2M 4)
-  , Signal dom (WishBoneS2M 4) ) ->
-  ( Signal dom (WishBoneM2S 4 30)
-  , Signal dom (WishBoneM2S 4 30)
-  , Signal dom RVFI
-  )
-core = mealyAutoB transition cpuStart
+  Signal dom CoreIn ->
+  Signal dom CoreOut
+core = mealyAuto transition cpuStart
  where
   cpuStart
     = CoreState
     { stage = InstructionFetch
     , pc = 0
-    , instruction = noop
+    , instruction = 0
     , registers = emptyRegisterFile
     , machineState = machineStart
     , rvfiOrder = 0
@@ -114,6 +143,7 @@ core = mealyAutoB transition cpuStart
     { mstatus = MStatus { mie = False, mpie = False }
     , mcause = MCause { interrupt = False, code = 0 }
     , mtvec = Direct 0
+    , mie = Mie { meie = False, mtie = False, msie = False }
     , mscratch = 0
     , mepc = 0
     , mtval = 0
@@ -121,476 +151,364 @@ core = mealyAutoB transition cpuStart
 
 transition ::
   CoreState ->
-  ( WishBoneS2M 4, WishBoneS2M 4 ) ->
-  ( CoreState
-  , ( WishBoneM2S 4 30
-    , WishBoneM2S 4 30
-    , RVFI ))
-transition s@(CoreState { stage = InstructionFetch, pc }) (iBus,_)
-  = ( s { stage = if acknowledge iBus then
-                    Execute
-                  else
-                    InstructionFetch
-        , instruction = decodeInstruction (readData iBus)
-        }
-    , ( (defM2S @4 @30)
-               { addr   = pc
-               , cycle  = True
-               , strobe = True
-               }
-      , defM2S
-      , defRVFI ) )
+  CoreIn ->
+  ( CoreOut
+  , CoreState )
+transition s@CoreState{stage=InstructionFetch, pc} CoreIn{iBusS2M} = withState s do
+  #stage .= if err iBusS2M then
+              Execute False
+            else if acknowledge iBusS2M then
+              Execute True
+            else
+              InstructionFetch
 
-transition s@(CoreState { stage = Execute, instruction, pc, registers, machineState, rvfiOrder }) (_,dBusS2M)
-  =
-  let dstReg = case instruction of
-        RRInstr (RInstr {dest}) -> Just dest
-        RIInstr iinstr -> case iinstr of
-          IInstr {dest} -> Just dest
-          ShiftInstr {dest} -> Just dest
-          LUI {dest} -> Just dest
-          AUIPC {dest} -> Just dest
-        CSRInstr csrInstr -> case csrInstr of
-          CSRRInstr {dest} -> Just dest
-          CSRIInstr {dest} -> Just dest
-        MemoryInstr minstr -> case minstr of
-          LOAD {dest} | not loadTrap && acknowledge dBusS2M -> Just dest
-          _ -> Nothing
-        JumpInstr jinstr | not pcTrap -> case jinstr of
-          JAL {dest} -> Just dest
-          JALR {dest} -> Just dest
-        _ -> Nothing
+  #instruction .= readData iBusS2M
 
-      aluResult = case instruction of
-        RRInstr (RInstr {opcode,src1,src2}) ->
-          let arg1 = readRegisterFile registers src1
-              arg2 = readRegisterFile registers src2
-              shiftAmount = unpack (resize (slice d4 d0 arg2))
-          in case opcode of
-            ADD -> arg1 + arg2
-            SUB -> arg1 - arg2
-            SLT -> if (unpack arg1 :: Signed 32) < unpack arg2 then
-                     1
-                   else
-                     0
-            SLTU -> if arg1 < arg2 then
-                      1
-                    else
-                      0
-            AND -> arg1 .&. arg2
-            OR -> arg1 .|. arg2
-            XOR -> arg1 `xor` arg2
-            SLL -> shiftL arg1 shiftAmount
-            SRL -> shiftR arg1 shiftAmount
-            SRA -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
-#if !defined(RISCV_FORMAL_ALTOPS)
-            MUL -> arg1 * arg2
-            MULH -> slice d63 d32 (signExtend arg1 * signExtend arg2 :: BitVector 64)
-            MULHSU -> slice d63 d32 (signExtend arg1 * zeroExtend arg2 :: BitVector 64)
-            MULHU -> slice d63 d32 (zeroExtend arg1 * zeroExtend arg2 :: BitVector 64)
-            DIV -> if arg2 == 0 then
-                     (-1)
-                   else if arg1 == pack (minBound :: Signed 32) && arg2 == (-1) then
-                     pack (minBound :: Signed 32)
-                   else
-                     pack ((unpack arg1 :: Signed 32) `quot` unpack arg2)
-            DIVU -> if arg2 == 0 then
-                      (-1)
-                    else
-                      arg1 `quot` arg2
-            REM -> if arg2 == 0 then
-                     arg1
-                   else if arg1 == pack (minBound :: Signed 32) && arg2 == (-1) then
-                     0
-                   else
-                     pack ((unpack arg1 :: Signed 32) `rem` unpack arg2)
-            REMU -> if arg2 == 0 then
-                      arg1
-                    else
-                      arg1 `rem` arg2
-#else
-            MUL -> (arg1 + arg2) `xor` 0x2cdf52a55876063e
-            MULH -> (arg1 + arg2) `xor` 0x15d01651f6583fb7
-            MULHSU -> (arg1 - arg2) `xor` 0xea3969edecfbe137
-            MULHU -> (arg1 + arg2) `xor` 0xd13db50d949ce5e8
-            DIV -> (arg1 - arg2) `xor` 0x29bbf66f7f8529ec
-            DIVU -> (arg1 - arg2) `xor` 0x8c629acb10e8fd70
-            REM -> (arg1 - arg2) `xor` 0xf5b7d8538da68fa5
-            REMU -> (arg1 - arg2) `xor` 0xbc4402413138d0e1
-#endif
-        RIInstr iinstr -> case iinstr of
-          IInstr {iOpcode,src,imm12} ->
-            let arg1 = readRegisterFile registers src
-                arg2 = signExtend imm12
-            in case iOpcode of
-              ADDI -> arg1 + arg2
-              SLTI -> if (unpack arg1 :: Signed 32) < unpack arg2 then
-                        1
-                      else
-                        0
-              SLTIU -> if arg1 < arg2 then
-                         1
-                       else
-                         0
-              XORI -> arg1 `xor` arg2
-              ORI -> arg1 .|. arg2
-              ANDI -> arg1 .&. arg2
-          ShiftInstr {sOpcode,src,shamt} ->
-            let arg1 = readRegisterFile registers src
-                shiftAmount = unpack (resize shamt)
-            in case sOpcode of
-              SLLI -> shiftL arg1 shiftAmount
-              SRLI -> shiftR arg1 shiftAmount
-              SRAI -> pack (shiftR (unpack arg1 :: Signed 32) shiftAmount)
-          LUI {imm20} ->
-            imm20 ++# 0
-          AUIPC {imm20} ->
-            (pc ++# 0) + (imm20 ++# 0)
-        CSRInstr csrInstr -> case csr csrInstr of
-          MSTATUS -> case mstatus machineState of
-            MStatus {mpie, mie} ->
-              shiftL (boolToBitVector mpie) 7 .|.
-              shiftL (boolToBitVector mie) 3
-          MTVEC -> pack (mtvec machineState)
-          MSCRATCH -> mscratch machineState
-          MEPC -> resize (mepc machineState) `shiftL` 2
-          MCAUSE -> case mcause machineState of
-            MCause {interrupt, code} ->
-              pack interrupt ++# 0 ++# code
-          MTVAL -> mtval machineState
-          _ -> 0
+  return $ defCoreOut
+         { iBusM2S = defM2S
+                   { addr   = pc
+                   , select = 0b1111
+                   , cycle  = True
+                   , strobe = True } }
 
-        MemoryInstr minstr -> case minstr of
-          LOAD {loadWidth} ->
-            let alignedRData = readData dBusS2M `shiftR` (fromEnum loadAlign * 8)
-            in  case loadWidth of
-                  Width Byte -> signExtend (slice d7 d0 alignedRData)
-                  Width Half -> signExtend (slice d15 d0 alignedRData)
-                  HalfUnsigned -> zeroExtend (slice d15 d0 alignedRData)
-                  ByteUnsigned -> zeroExtend (slice d7 d0 alignedRData)
-                  _ -> alignedRData
-          _ -> 0
-        JumpInstr {} -> (pc + 1) ++# 0
-        _ -> 0
+transition s@CoreState{stage=Execute False, pc, machineState} _ = withState s do
+  let MachineState{mstatus=MStatus{mie},mtvec} = machineState
+  #machineState .= machineState
+                 { mstatus = MStatus { mpie = mie, mie = False }
+                 , mcause  = INSTRUCTION_ACCESS_FAULT
+                 , mepc    = pc
+                 , mtval   = pc ++# 0 }
 
-      (pcN0,pcTrap) = case instruction of
-        BranchInstr (Branch {imm,cond,src1,src2}) ->
-          let arg1 = readRegisterFile registers src1
-              arg2 = readRegisterFile registers src2
-              taken = case cond of
-                BEQ -> arg1 == arg2
-                BNE -> arg1 /= arg2
-                BLT -> (unpack arg1 :: Signed 32) < unpack arg2
-                BLTU -> arg1 < arg2
-                BGE -> (unpack arg1 :: Signed 32) >= unpack arg2
-                BGEU -> arg1 >= arg2
-          in if taken then
-               let (offset,align) = split (signExtend imm `shiftL` 1 :: Word32)
-               in  (pc + offset,align /= 0)
-             else
-               (pc + 1,False)
-        JumpInstr jinstr -> case jinstr of
-          JAL {imm} ->
-            let (pcOffset,align) = split (signExtend imm `shiftL` 1 :: Word32)
-            in  (pc + pcOffset,align /=0)
-          JALR {offset,base} ->
-            let arg1 = readRegisterFile registers base
-                (pcN,align) = split (arg1 + signExtend offset)
-            in  (pcN,testBit align 1)
-        MemoryInstr {} | not (acknowledge dBusS2M) ->
-          (pc,False)
-        EnvironmentInstr einstr -> case einstr of
-          ECALL  -> (pc,True)
-          EBREAK -> (pc,True)
-          MRET   -> (mepc machineState,False)
-        _ -> (pc+1,False)
+  #pc .= 0 ++# slice d29 d2 (trapBase mtvec)
 
-      (loadAddres,loadMask,loadAlign,loadTrap) = case instruction of
-        MemoryInstr (LOAD {offset,base,loadWidth}) ->
-          let addr = readRegisterFile registers base + signExtend offset
-              align = slice d1 d0 addr
-              mask = loadWidthSelect loadWidth
-              trapped = case mask of
-                          0b1111 -> align /= 0
-                          0b0011 -> testBit align 0
-                          _      -> False
-          in  (addr,mask `shiftL` fromEnum align,align,trapped)
-        _ -> (0,0,0,False)
+  #stage .= InstructionFetch
 
-      (storeAddress,storeMask,storeWData,storeTrap) = case instruction of
-        MemoryInstr (STORE {base,offset,width,src}) ->
-          let addr = readRegisterFile registers base + signExtend offset
-              align = slice d1 d0 addr
-              mask = loadWidthSelect (Width width)
-              wdata = readRegisterFile registers src
-              trapped = case width of
-                          Word -> align /= 0
-                          Half -> testBit align 0
-                          Byte -> False
-          in  ( addr
-              , mask `shiftL` fromEnum align
-              , wdata `shiftL` (fromEnum align * 8)
-              , trapped )
-        _ -> (0,0,0,False)
+  return defCoreOut
 
-      trap = pcTrap || loadTrap || storeTrap
+transition s@CoreState{stage=Execute True,instruction,registers,pc} CoreIn{dBusS2M} = withState s do
+  let DecodedInstruction
+        { opcode, rd, rs1, rs2, iop, srla, shamt, isSub, imm12I, imm20U, imm12S, func3 }
+        = decodeInstruction instruction
 
-      pcN1
-        | trap
-        = zeroExtend (slice d29 d2 (trapBase (mtvec machineState)))
-        | otherwise
-        = pcN0
+      (rs1Val,rs2Val) = readRegisterFile registers rs1 rs2
 
-      machineStateN = case instruction of
-        EnvironmentInstr einstr -> case einstr of
-          ECALL ->
-            machineState
-              { mtval = 0
-              , mstatus = MStatus { mpie = mie (mstatus machineState)
-                                  , mie  = False
-                                  }
-              , mepc = resize (pack pc) `shiftL` 2
-              , mcause = MCause { interrupt = False, code = 11 }
-              }
-          EBREAK ->
-            machineState
-              { mtval = 0
-              , mstatus = MStatus { mpie = mie (mstatus machineState)
-                                  , mie  = False
-                                  }
-              , mepc = resize (pack pc) `shiftL` 2
-              , mcause = MCause { interrupt = False, code = 3 }
-              }
-          MRET ->
-            machineState
-              { mstatus = MStatus { mpie = True
-                                  , mie  = mpie (mstatus (machineState))
-                                  }
-              }
-        CSRInstr csrInstr ->
-          let writeValue = case csrInstr of
-                CSRRInstr {src=X0} -> Nothing
-                CSRRInstr {src} -> Just (readRegisterFile registers src)
-                CSRIInstr {imm=0} -> Nothing
-                CSRIInstr {imm} -> Just (zeroExtend imm)
+      aluArg1 = case opcode of
+                  LUI   -> 0
+                  AUIPC -> pc ++# 0
+                  JAL   -> pc ++# 0
+                  JALR  -> pc ++# 0
+                  _     -> rs1Val
+      aluArg2 = case opcode of
+                  LUI    -> imm20U ++# 0
+                  AUIPC  -> imm20U ++# 0
+                  JAL    -> 4
+                  JALR   -> 4
+                  OP     -> if isSub then negate rs2Val else rs2Val
+                  STORE  -> signExtend imm12S
+                  _      -> signExtend imm12I
+      aluOp   = case opcode of
+                  OP     -> iop
+                  OP_IMM -> iop
+                  _      -> ADD
 
-              oldValue = case csr csrInstr of
-                MIE -> undefined
-                MTVEC -> pack (mtvec machineState)
-                MSCRATCH -> mscratch machineState
-                MEPC -> resize (mepc machineState) `shiftL` 2
-                MCAUSE -> case mcause machineState of
-                  MCause {interrupt, code} ->
-                    pack interrupt ++# 0 ++# code
-                MTVAL -> mtval machineState
-                _ -> 0
+      aluIResult = case aluOp of
+        ADD  -> aluArg1 + aluArg2
+        SLL  -> aluArg1 `shiftL` unpack (zeroExtend shamt)
+        SLT  -> boolToMachineWord ((unpack aluArg1 :: Signed 32) < unpack aluArg2)
+        SLTU -> boolToMachineWord (aluArg1 < aluArg2)
+        XOR  -> aluArg2 `xor` aluArg2
+        SR   -> case srla of
+                  Logical    -> aluArg1 `shiftR` unpack (zeroExtend shamt)
+                  Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR` unpack (zeroExtend shamt))
+        OR   -> aluArg1 .|. aluArg2
+        AND  -> aluArg2 .&. aluArg2
 
-              newValue = csrWrite (csrType csrInstr) oldValue writeValue
-          in  case csr csrInstr of
-                MSTATUS ->
-                  machineState
-                    { mstatus = MStatus { mpie = testBit newValue 7
-                                        , mie  = testBit newValue 3
-                                        }
-                    }
-                MTVEC ->
-                  machineState
-                    { mtvec = case unpack (clearBit newValue 1) of
-                        Direct base | slice d1 d0 base /= 0 -> mtvec machineState
-                        Vectored base | slice d1 d0 base /= 0 -> mtvec machineState
-                        val -> val
-                    }
-                MSCRATCH ->
-                  machineState
-                    { mscratch = newValue
-                    }
-                MEPC ->
-                  machineState
-                    { mepc = resize (newValue `shiftR` 2)
-                    }
-                MCAUSE ->
-                  machineState
-                    { mcause = MCause { interrupt = testBit newValue 31
-                                      , code      = truncateB newValue
-                                      }
-                    }
-                MTVAL ->
-                  machineState
-                    { mtval = newValue
-                    }
-                _ ->
-                  machineState
-        _ ->
-          if trap then
-            machineState
-              { mtval =
-                  if loadTrap then
-                    loadAddres
-                  else if storeTrap then
-                    storeAddress
-                  else
-                    pcN0 ++# 0
+      (dBusM2S,ldVal,busErr,addrUnaligned,lsFinished) =
+        loadStoreUnit opcode func3 aluIResult rs2Val dBusS2M
 
-              , mstatus = MStatus { mpie = mie (mstatus machineState)
-                                  , mie  = False
-                                  }
-              , mepc = pc
-              , mcause = MCause { interrupt = False
-                                , code =
-                                    if loadTrap then
-                                      4
-                                    else if storeTrap then
-                                      6
-                                    else
-                                      0
-                                }
-              }
-          else
-            machineState
+      rdVal = case opcode of
+        BRANCH   -> Nothing
+        MISC_MEM -> Nothing
+        SYSTEM   -> Nothing
+        STORE    -> Nothing
+        LOAD     -> ldVal
+        _        -> Just aluIResult
 
-      dBusM2S = case instruction of
-        MemoryInstr minstr | not trap -> case minstr of
-          LOAD {} ->
-            defM2S
-              { addr   = slice d31 d2 loadAddres
-              , select = loadMask
-              , cycle  = True
-              , strobe = True
-              }
-          STORE {} ->
-            defM2S
-              { addr        = slice d31 d2 storeAddress
-              , writeData   = storeWData
-              , select      = storeMask
-              , cycle       = True
-              , strobe      = True
-              , writeEnable = True
-              }
-        _ -> defM2S
-  in
-    ( s { stage = case instruction of
-            MemoryInstr {}
-              | not (trap || acknowledge dBusS2M)
-              -> Execute
-            _ -> InstructionFetch
-        , pc = pcN1
-        , registers = writeRegisterFile registers ((,) <$> dstReg <*> pure aluResult)
-        , machineState = machineStateN
-        , rvfiOrder = case instruction of
-            MemoryInstr {}
-              | not (trap || acknowledge dBusS2M)
-              -> rvfiOrder
-            _ -> rvfiOrder + 1
-        }
-    , ( defM2S
-      , dBusM2S
-      , toRVFI instruction
-               rvfiOrder
-               registers
-               dstReg
-               aluResult
-               pc
-               pcN1
-               trap
-               dBusM2S
-               dBusS2M
-      ) )
+  #registers .= writeRegisterFile registers ((rd,) <$> rdVal)
 
-loadWidthSelect :: LoadWidth -> BitVector 4
-loadWidthSelect lw = case lw of
-  Width Byte -> 0b0001
-  Width Half -> 0b0011
-  Width Word -> 0b1111
-  HalfUnsigned -> 0b0011
-  ByteUnsigned -> 0b0001
-{-# INLINE loadWidthSelect #-}
+  return $ defCoreOut
+         { dBusM2S = dBusM2S }
 
-toRVFI ::
-  -- | Current decoded instruction
-  Instr ->
-  -- | Order
-  Unsigned 64 ->
-  -- | Registers
-  RegisterFile ->
-  -- | Destination register
-  Maybe Register ->
-  -- | Destination register write data
-  BitVector 32 ->
-  -- | Current PC
-  BitVector 30 ->
-  -- | Next PC
-  BitVector 30 ->
-  -- | Trap
-  Bool ->
-  -- | Data Bus M2S
-  WishBoneM2S 4 30 ->
-  -- | Data Bus S2M
+loadStoreUnit ::
+  Opcode ->
+  -- func3
+  BitVector 3 ->
+  -- address
+  MachineWord ->
+  -- store
+  MachineWord ->
+  -- DBUS
   WishBoneS2M 4 ->
-  RVFI
-toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN trap dBusM2S dBusS2M =
-  let rs1AddrN = case instruction of
-                   BranchInstr (Branch {src1}) -> src1
-                   CSRInstr (CSRRInstr {src}) -> src
-                   JumpInstr (JALR {base}) -> base
-                   MemoryInstr (LOAD {base}) -> base
-                   MemoryInstr (STORE {base}) -> base
-                   RRInstr (RInstr {src1}) -> src1
-                   RIInstr (IInstr {src}) -> src
-                   RIInstr (ShiftInstr {src}) -> src
-                   _ -> X0
+  (WishBoneM2S 4 30, Maybe MachineWord, Bool, Bool, Bool)
+loadStoreUnit opcode func3 addr store dBusS2M = case opcode of
+  LOAD -> let
+    lextend ::
+      (KnownNat n, n <= 32) =>
+      BitVector (32 - n) ->
+      MachineWord
+    lextend = if unpack (slice d2 d2 func3) then
+                zeroExtend
+              else
+                signExtend
 
-      rs2AddrN = case instruction of
-                   BranchInstr (Branch {src2}) -> src2
-                   MemoryInstr (STORE {src}) -> src
-                   RRInstr (RInstr {src2}) -> src2
-                   _ -> X0
-  in  defRVFI
-        { valid = case instruction of
-            MemoryInstr {} | not trap -> acknowledge dBusS2M
-            _ -> True
-        , order    = rvfiOrder
-        , insn     = encodeInstruction instruction
-        , trap     = trap
-        , rs1Addr  = rs1AddrN
-        , rs2Addr  = rs2AddrN
-        , rs1RData = readRegisterFile registers rs1AddrN
-        , rs2RData = readRegisterFile registers rs2AddrN
-        , rdAddr   = fromMaybe X0 dstReg
-          -- Since we take the tail for the written to registers, this is okay
-        , rdWData  = case fromMaybe X0 dstReg of
-                       X0 -> 0
-                       _ -> aluResult
-        , pcRData  = pc ++# 0
-        , pcWData  = pcN ++# 0
-        , memAddr  = if trap then 0 else addr dBusM2S ++# 0
-        , memRMask = if strobe dBusM2S && not (writeEnable dBusM2S) then
-                       select dBusM2S
-                     else
-                       0
-        , memWMask = if strobe dBusM2S && writeEnable dBusM2S then
-                       select dBusM2S
-                     else
-                       0
-        , memRData = if strobe dBusM2S && not (writeEnable dBusM2S) then
-                       readData dBusS2M
-                     else
-                       0
-        , memWData = if strobe dBusM2S && writeEnable dBusM2S then
-                       writeData dBusM2S
-                     else
-                       0
+    loadData = case lsw of
+                 Word -> readData dBusS2M
+                 Half -> lextend (
+                         slice d15 d0 (
+                         readData dBusS2M `shiftR` shiftAmount))
+                 Byte -> lextend (
+                         slice d7 d0 (
+                         readData dBusS2M `shiftR` shiftAmount))
+    in
+    ( defM2S
+        { addr = slice d31 d2 addr
+        , select = mask
+        , cycle = True
+        , strobe = True
         }
+    , if unaligned || err dBusS2M || not (acknowledge dBusS2M) then
+        Nothing
+      else
+        Just loadData
+    , err dBusS2M
+    , unaligned
+    , acknowledge dBusS2M
+    )
+  STORE -> let
+    storeData = case lsw of
+                  Word -> store
+                  Half -> store `shiftL` shiftAmount
+                  Byte -> store `shiftL` shiftAmount
+    in
+    ( defM2S
+       { addr = slice d31 d2 addr
+       , writeData = storeData
+       , select = mask
+       , cycle = True
+       , strobe = True
+       , writeEnable = True
+       }
+    , Nothing
+    , err dBusS2M
+    , unaligned
+    , acknowledge dBusS2M
+    )
+  _ ->
+    ( defM2S
+    , undefined
+    , False
+    , False
+    , True
+    )
+ where
+  lsw = unpack (slice d1 d0 func3)
 
-csrWrite ::
-  CSRType ->
-  Word32 ->
-  Maybe Word32 ->
-  Word32
-csrWrite ReadWrite oldValue Nothing = oldValue
-csrWrite ReadWrite _ (Just newValue) = newValue
+  alignment = slice d1 d0 addr
 
-csrWrite ReadSet oldValue Nothing = oldValue
-csrWrite ReadSet oldValue (Just newValue) = oldValue .|. newValue
+  unaligned = case lsw of
+    Word -> alignment /= 0
+    Half -> testBit alignment 0
+    Byte -> False
 
-csrWrite ReadClear oldValue Nothing = oldValue
-csrWrite ReadClear oldValue (Just newValue) = oldValue .&. newValue
+  mask = case lsw of
+    Word -> 0b1111
+    Half -> case alignment of
+              2 -> 0b1100
+              _ -> 0b0011
+    Byte -> case alignment of
+              3 -> 0b1000
+              2 -> 0b0100
+              1 -> 0b0010
+              _ -> 0b0001
+
+  shiftAmount = case lsw of
+    Word -> 0
+    Half -> case alignment of
+              2 -> 16
+              _ -> 0
+    Byte -> case alignment of
+              3 -> 24
+              2 -> 16
+              1 -> 8
+              _ -> 0
+
+data DecodedInstruction
+  = DecodedInstruction
+  { opcode :: Opcode
+  , rd     :: Register
+  , rs1    :: Register
+  , rs2    :: Register
+  , iop    :: IOp
+  , srla   :: ShiftRight
+  , shamt  :: BitVector 5
+  , isSub  :: Bool
+  , isM    :: Bool
+  , mop    :: MOp
+  , imm20U :: BitVector 20
+  , imm20J :: BitVector 20
+  , imm12I :: BitVector 12
+  , imm12S :: BitVector 12
+  , imm12B :: BitVector 12
+  , func3  :: BitVector 3
+  }
+
+decodeInstruction ::
+  MachineWord ->
+  DecodedInstruction
+decodeInstruction w
+  = DecodedInstruction
+  { opcode = unpack (slice d6 d0 w)
+  , rd     = unpack (slice d11 d7 w)
+  , rs1    = unpack (slice d19 d15 w)
+  , rs2    = unpack (slice d24 d20 w)
+  , iop    = unpack (slice d14 d12 w)
+  , srla   = unpack (slice d30 d30 w)
+  , shamt  = unpack (slice d24 d20 w)
+  , isSub  = unpack (slice d30 d30 w)
+  , isM    = unpack (slice d25 d25 w)
+  , mop    = unpack (slice d14 d12 w)
+  , imm20U = slice d31 d12 w
+  , imm20J = slice d31 d31 w ++#
+             slice d19 d12 w ++#
+             slice d20 d20 w ++#
+             slice d30 d21 w
+
+  , imm12I = slice d31 d20 w
+  , imm12S = slice d31 d25 w ++# slice d11 d7 w
+  , imm12B = slice d31 d31 w ++#
+             slice  d7  d7 w ++#
+             slice d30 d25 w ++#
+             slice d11  d8 w
+  , func3  = slice d14 d12 w
+  }
+
+boolToMachineWord :: Bool -> MachineWord
+boolToMachineWord = zeroExtend . pack
+{-# INLINE boolToMachineWord #-}
+
+-- isLegalInstruction :: Opcode -> Bool
+-- isLegalInstruction o = case o of
+--   LUI -> True
+--   AUIPC -> True
+--   JAL -> True
+--   JALR -> True
+--   Branch -> True
+--   Load -> True
+--   Store -> True
+--   Imm -> True
+--   RegReg -> True
+--   MiscMem -> True
+--   System -> True
+--   _ -> False
+
+-- data MachineState
+--   = MachineState
+--   { mstatus :: MStatus
+--   , mcause :: MCause
+--   , mtvec :: InterruptMode
+--   , mie :: Mie
+--   , mscratch :: MachineWord
+--   , mepc :: PC
+--   , mtval :: MachineWord
+--   }
+--   deriving (Generic, NFDataX)
+
+-- toRVFI ::
+--   -- | Current decoded instruction
+--   Instr ->
+--   -- | Order
+--   Unsigned 64 ->
+--   -- | Registers
+--   RegisterFile ->
+--   -- | Destination register
+--   Maybe Register ->
+--   -- | Destination register write data
+--   BitVector 32 ->
+--   -- | Current PC
+--   BitVector 30 ->
+--   -- | Next PC
+--   BitVector 30 ->
+--   -- | Trap
+--   Bool ->
+--   -- | Data Bus M2S
+--   WishBoneM2S 4 30 ->
+--   -- | Data Bus S2M
+--   WishBoneS2M 4 ->
+--   RVFI
+-- toRVFI instruction rvfiOrder registers dstReg aluResult pc pcN trap dBusM2S dBusS2M =
+--   let rs1AddrN = case instruction of
+--                    BranchInstr (Branch {src1}) -> src1
+--                    CSRInstr (CSRRInstr {src}) -> src
+--                    JumpInstr (JALR {base}) -> base
+--                    MemoryInstr (LOAD {base}) -> base
+--                    MemoryInstr (STORE {base}) -> base
+--                    RRInstr (RInstr {src1}) -> src1
+--                    RIInstr (IInstr {src}) -> src
+--                    RIInstr (ShiftInstr {src}) -> src
+--                    _ -> X0
+
+--       rs2AddrN = case instruction of
+--                    BranchInstr (Branch {src2}) -> src2
+--                    MemoryInstr (STORE {src}) -> src
+--                    RRInstr (RInstr {src2}) -> src2
+--                    _ -> X0
+--   in  defRVFI
+--         { valid = case instruction of
+--             MemoryInstr {} | not trap -> acknowledge dBusS2M
+--             _ -> True
+--         , order    = rvfiOrder
+--         , insn     = encodeInstruction instruction
+--         , trap     = trap
+--         , rs1Addr  = rs1AddrN
+--         , rs2Addr  = rs2AddrN
+--         , rs1RData = readRegisterFile registers rs1AddrN
+--         , rs2RData = readRegisterFile registers rs2AddrN
+--         , rdAddr   = fromMaybe X0 dstReg
+--           -- Since we take the tail for the written to registers, this is okay
+--         , rdWData  = case fromMaybe X0 dstReg of
+--                        X0 -> 0
+--                        _ -> aluResult
+--         , pcRData  = pc ++# 0
+--         , pcWData  = pcN ++# 0
+--         , memAddr  = if trap then 0 else addr dBusM2S ++# 0
+--         , memRMask = if strobe dBusM2S && not (writeEnable dBusM2S) then
+--                        select dBusM2S
+--                      else
+--                        0
+--         , memWMask = if strobe dBusM2S && writeEnable dBusM2S then
+--                        select dBusM2S
+--                      else
+--                        0
+--         , memRData = if strobe dBusM2S && not (writeEnable dBusM2S) then
+--                        readData dBusS2M
+--                      else
+--                        0
+--         , memWData = if strobe dBusM2S && writeEnable dBusM2S then
+--                        writeData dBusM2S
+--                      else
+--                        0
+--         }
+
+-- csrWrite ::
+--   CSRType ->
+--   Word32 ->
+--   Maybe Word32 ->
+--   Word32
+-- csrWrite ReadWrite oldValue Nothing = oldValue
+-- csrWrite ReadWrite _ (Just newValue) = newValue
+
+-- csrWrite ReadSet oldValue Nothing = oldValue
+-- csrWrite ReadSet oldValue (Just newValue) = oldValue .|. newValue
+
+-- csrWrite ReadClear oldValue Nothing = oldValue
+-- csrWrite ReadClear oldValue (Just newValue) = oldValue .&. newValue

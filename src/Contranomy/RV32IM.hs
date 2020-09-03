@@ -70,6 +70,7 @@ module Contranomy.RV32IM
   , Word12
   , Word20
   , Word32
+  , MachineWord32
   ) where
 
 import Clash.Class.AutoReg (AutoReg)
@@ -301,6 +302,8 @@ type Word5 = BitVector 5
 type Word12 = BitVector 12
 type Word20 = BitVector 20
 type Word32 = BitVector 32
+
+type MachineWord32 = BitVector 32
 
 -- Use custom bit-representation, so we can get a TH-derived bitpack instance,
 -- which significantly reduces generated Verilog

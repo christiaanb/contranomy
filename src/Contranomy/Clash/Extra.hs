@@ -2,6 +2,22 @@ module Contranomy.Clash.Extra where
 
 import Clash.Class.AutoReg (AutoReg)
 import Clash.Prelude
+import Control.Monad.Trans.State
+
+mealyAuto ::
+  (HiddenClockResetEnable dom, AutoReg s) =>
+  (s -> i -> (o,s)) ->
+  s ->
+  (Signal dom i -> Signal dom o)
+mealyAuto transition start =
+  \i -> let (o,sN) = unbundle (transition <$> s <*> i)
+            s      = setName @"core" autoReg start sN
+        in  o
+{-# INLINE mealyAuto #-}
+
+withState :: s -> State s o -> (o,s)
+withState s m = runState m s
+{-# INLINE withState #-}
 
 mealyAutoB ::
   (HiddenClockResetEnable dom, AutoReg s, Bundle i, Bundle o) =>

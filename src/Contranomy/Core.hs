@@ -176,7 +176,7 @@ transition s@CoreState{stage=Decode instrFault,instruction} _ = runState' s do
 transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfiOrder}
   (CoreIn{dBusS2M},(rs1Val,rs2Val)) = runState' s do
   let DecodedInstruction
-        { opcode, rd, rs1, rs2, iop, srla, shamt, isSub, imm12I, imm20U, imm12S }
+        { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S }
         = decodeInstruction instruction
 
       aluArg1 = case opcode of
@@ -193,6 +193,9 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
                   OP     -> if isSub then negate rs2Val else rs2Val
                   STORE  -> signExtend imm12S
                   _      -> signExtend imm12I
+
+      aluArg2Shamt = unpack (zeroExtend (slice d4 d0 aluArg2))
+
       aluOp   = case opcode of
                   OP     -> iop
                   OP_IMM -> iop
@@ -200,14 +203,13 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
 
       aluIResult = case aluOp of
         ADD  -> aluArg1 + aluArg2
-        SLL  -> aluArg1 `shiftL` unpack (zeroExtend shamt)
+        SLL  -> aluArg1 `shiftL` aluArg2Shamt
         SLT  -> boolToMachineWord ((unpack aluArg1 :: Signed 32) < unpack aluArg2)
         SLTU -> boolToMachineWord (aluArg1 < aluArg2)
         XOR  -> aluArg1 `xor` aluArg2
         SR   -> case srla of
-                  Logical    -> aluArg1 `shiftR` unpack (zeroExtend shamt)
-                  Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR`
-                                unpack (zeroExtend shamt))
+                  Logical    -> aluArg1 `shiftR` aluArg2Shamt
+                  Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR` aluArg2Shamt)
         OR   -> aluArg1 .|. aluArg2
         AND  -> aluArg1 .&. aluArg2
 

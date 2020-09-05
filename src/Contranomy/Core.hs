@@ -19,6 +19,7 @@ import Control.Lens
 import Data.Generics.Labels ()
 import Data.Maybe
 import Control.Monad
+import Control.Monad.Trans.State (State)
 
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
@@ -157,9 +158,9 @@ transition ::
   , CoreState )
 transition s@CoreState{stage=InstructionFetch, pc} CoreIn{iBusS2M} = withState s do
   #stage .= if err iBusS2M then
-              Execute False
-            else if acknowledge iBusS2M then
               Execute True
+            else if acknowledge iBusS2M then
+              Execute False
             else
               InstructionFetch
 
@@ -172,21 +173,7 @@ transition s@CoreState{stage=InstructionFetch, pc} CoreIn{iBusS2M} = withState s
                    , cycle  = True
                    , strobe = True } }
 
-transition s@CoreState{stage=Execute False, pc, machineState} _ = withState s do
-  let MachineState{mstatus=MStatus{mie},mtvec} = machineState
-  #machineState .= machineState
-                 { mstatus = MStatus { mpie = mie, mie = False }
-                 , mcause  = INSTRUCTION_ACCESS_FAULT
-                 , mepc    = pc
-                 , mtval   = pc ++# 0 }
-
-  #pc .= 0 ++# slice d29 d2 (trapBase mtvec)
-
-  #stage .= InstructionFetch
-
-  return defCoreOut
-
-transition s@CoreState{stage=Execute True,instruction,registers,pc} CoreIn{dBusS2M} = withState s do
+transition s@CoreState{stage=Execute instrFault,instruction,registers,pc,machineState} CoreIn{dBusS2M} = withState s do
   let DecodedInstruction
         { opcode, rd, rs1, rs2, iop, srla, shamt, isSub, imm12I, imm20U, imm20J, imm12S, imm12B, func3 }
         = decodeInstruction instruction
@@ -220,33 +207,84 @@ transition s@CoreState{stage=Execute True,instruction,registers,pc} CoreIn{dBusS
         XOR  -> aluArg2 `xor` aluArg2
         SR   -> case srla of
                   Logical    -> aluArg1 `shiftR` unpack (zeroExtend shamt)
-                  Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR` unpack (zeroExtend shamt))
+                  Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR`
+                                unpack (zeroExtend shamt))
         OR   -> aluArg1 .|. aluArg2
         AND  -> aluArg2 .&. aluArg2
 
-      (dBusM2S,ldVal,busErr,addrUnaligned,lsFinished) =
+      (dBusM2S,ldVal,dataFault,addrUnaligned,lsFinished) =
         loadStoreUnit opcode func3 aluIResult rs2Val dBusS2M
 
-      (pcN,pcUnaligned) = branchUnit opcode func3 rs1Val rs2Val imm12B imm12I imm20J pc
+      pcN = branchUnit opcode func3 rs1Val rs2Val imm12B imm12I imm20J pc
+      psMisaligned = snd pcN /= 0
 
-      rdVal = case opcode of
+  csrResult <- csrUnit instrFault opcode func3 rs1Val (pack rs1) imm12I machineState
+
+  let rdVal = case opcode of
         BRANCH   -> Nothing
         MISC_MEM -> Nothing
-        SYSTEM   -> Nothing
+        SYSTEM   -> csrResult
         STORE    -> Nothing
         LOAD     -> ldVal
-        _        -> if pcUnaligned then
-                      Nothing
-                    else
-                      Just aluIResult
+        _        -> Just aluIResult
 
-  #registers .= writeRegisterFile registers ((rd,) <$> rdVal)
+  handleExceptions s opcode instrFault dataFault addrUnaligned psMisaligned
+    ((rd,) <$> rdVal) pcN
 
   when lsFinished $
     #stage .= InstructionFetch
 
   return $ defCoreOut
          { dBusM2S = dBusM2S }
+
+handleExceptions ::
+  CoreState ->
+  Opcode ->
+  -- instructionAccessFault
+  Bool ->
+  -- dataAccessFault
+  Bool ->
+  -- addrUnalignedFault
+  Bool ->
+  -- pcUnalignedFault
+  Bool ->
+  -- Register file write value
+  Maybe (Register,MachineWord) ->
+  -- Next PC
+  (PC,BitVector 2) ->
+  State CoreState ()
+handleExceptions CoreState{registers,pc,machineState} opcode instrFault dataFault
+  addrMisaligned pcMisaligned regWritePair (pcN,align) = do
+    let trap = instrFault || dataFault || addrMisaligned || pcMisaligned
+    let MachineState{mstatus=MStatus{mie},mtvec} = machineState
+
+    if trap then do
+      #machineState .= machineState
+                     { mstatus = MStatus { mpie = mie, mie = False }
+                     , mcause  = if instrFault then
+                                   INSTRUCTION_ACCESS_FAULT
+                                 else if pcMisaligned then
+                                   INSTRUCTION_ADDRESS_MISALIGNED
+                                 else if addrMisaligned then
+                                   case opcode of
+                                     LOAD -> LOAD_ADDRESS_MISALIGNED
+                                     _ -> STORE_ADDRESS_MISALIGNED
+                                 else -- dataFault
+                                   case opcode of
+                                     LOAD -> LOAD_ACCESS_FAULT
+                                     _ -> STORE_ACCESS_FAULT
+
+
+                     , mepc    = pc
+                     , mtval   = if pcMisaligned then
+                                  pcN ++# align
+                                else
+                                  pc ++# 0
+                     }
+      #pc .= 0 ++# slice d29 d2 (trapBase mtvec)
+    else do
+      #registers .= writeRegisterFile registers regWritePair
+      #pc .= pcN
 
 loadStoreUnit ::
   Opcode ->
@@ -369,7 +407,7 @@ branchUnit ::
   BitVector 20 ->
   -- PC
   PC ->
-  (PC, Bool)
+  (PC, BitVector 2)
 branchUnit opcode func3 rs1 rs2 imm12B imm12I imm20J pc = case opcode of
   BRANCH ->
     let taken = case unpack func3 of
@@ -382,23 +420,26 @@ branchUnit opcode func3 rs1 rs2 imm12B imm12I imm20J pc = case opcode of
                   _ -> False
      in if taken then
           let (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
-           in (pc + offset, align /= 0)
+           in (pc + offset,align)
         else
-          (pc + 1, False)
+          (pc + 1, 0)
 
   JAL ->
     let (offset,align) = split (signExtend imm20J `shiftL` 1 :: MachineWord)
-     in (pc + offset, align /= 0)
+     in (pc + offset, align)
 
   JALR ->
     let (pcN, align) = split (rs1 + signExtend imm12I)
-     in (pcN, testBit align 1)
+        alignLSBZero = align .&. 0b10
+     in (pcN, alignLSBZero)
 
   _ ->
-    (pc + 1, False)
+    (pc + 1, 0)
 
 
 csrUnit ::
+  -- instruction access fault
+  Bool ->
   Opcode ->
   -- func 3
   BitVector 3 ->
@@ -408,8 +449,76 @@ csrUnit ::
   BitVector 5 ->
   -- func 12
   BitVector 12 ->
-  ()
-csrUnit = csrUnit
+  MachineState ->
+  State CoreState (Maybe MachineWord)
+csrUnit False SYSTEM func3 rs1Val uimm srcDest machineState = do
+  let MachineState
+        {mstatus=MStatus{mie,mpie}
+        ,mie=Mie{meie,mtie,msie}
+        ,mtvec
+        ,mscratch
+        ,mcause=MCause{interrupt,code}
+        ,mtval
+        ,mepc
+        } = machineState
+
+  return $ case CSRRegister srcDest of
+    MSTATUS  -> Just (bitB mpie 7 .|. bitB mie 3)
+    MISA     -> Just (bit 8 .|. bit 12)
+    MIE      -> Just (bitB meie 11 .|. bitB mtie 7 .|. bitB msie 3)
+    MTVEC    -> Just (pack mtvec)
+    MSCRATCH -> Just mscratch
+    MEPC     -> Just (mepc ++# 0)
+    MCAUSE   -> Just (pack interrupt ++# 0 ++# code)
+    MTVAL    -> Just mtval
+    _ -> Nothing
+ where
+  bitB b i = if b then bit i else 0
+
+
+-- data MStatus
+--   = MStatus
+--   { mie :: Bool
+--   , mpie :: Bool
+--   }
+--   deriving (Generic, NFDataX)
+
+-- deriveAutoReg ''MStatus
+
+-- data InterruptMode
+--   = Direct {trapBase :: (BitVector 30)}
+--   | Vectored {trapBase :: (BitVector 30)}
+--   deriving (Generic, NFDataX, AutoReg)
+
+-- {-# ANN module (DataReprAnn
+--                   $(liftQ [t|InterruptMode|])
+--                   32
+--                   [ ConstrRepr 'Direct   (1 `downto` 0) 0 [31 `downto` 2]
+--                   , ConstrRepr 'Vectored (1 `downto` 0) 1 [31 `downto` 2]
+--                   ]) #-}
+-- deriveBitPack [t| InterruptMode |]
+
+-- data Mie
+--   = Mie
+--   { meie :: Bool
+--   , mtie :: Bool
+--   , msie :: Bool
+--   }
+--   deriving (Generic, NFDataX)
+
+-- data MachineState
+--   = MachineState
+--   { mstatus :: MStatus
+--   , mcause :: MCause
+--   , mtvec :: InterruptMode
+--   , mie :: Mie
+--   , mscratch :: MachineWord
+--   , mepc :: PC
+--   , mtval :: MachineWord
+--   }
+--   deriving (Generic, NFDataX)
+
+csrUnit _ _ _ _ _ _ _ = return Nothing
 
 data DecodedInstruction
   = DecodedInstruction

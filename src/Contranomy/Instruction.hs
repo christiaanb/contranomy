@@ -12,13 +12,24 @@ module Contranomy.Instruction
       , OP_IMM
       , OP
       , MISC_MEM
-      , SYSTEM )
+      , SYSTEM
+      )
   , ShiftRight (..)
   , IOp (..)
   , MOp (..)
   , MachineWord
   , Register (..)
-  , MCause (..,INSTRUCTION_ACCESS_FAULT)
+  , MCause
+      ( ..
+      , INSTRUCTION_ADDRESS_MISALIGNED
+      , INSTRUCTION_ACCESS_FAULT
+      , ILLEGAL_INSTRUCTION
+      , BREAKPOINT
+      , LOAD_ADDRESS_MISALIGNED
+      , LOAD_ACCESS_FAULT
+      , STORE_ADDRESS_MISALIGNED
+      , STORE_ACCESS_FAULT
+      )
   , LoadStoreWidth (..)
   , BranchCondition
       ( BEQ
@@ -28,6 +39,10 @@ module Contranomy.Instruction
       , BLTU
       , BGEU
       )
+  , CSRRegister
+      ( MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH
+      , MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2
+      ,.. )
   )
 where
 
@@ -119,8 +134,17 @@ data MCause
 
 deriveAutoReg ''MCause
 
-pattern INSTRUCTION_ACCESS_FAULT :: MCause
+pattern INSTRUCTION_ADDRESS_MISALIGNED, INSTRUCTION_ACCESS_FAULT, ILLEGAL_INSTRUCTION,
+  BREAKPOINT, LOAD_ADDRESS_MISALIGNED, LOAD_ACCESS_FAULT, STORE_ADDRESS_MISALIGNED,
+  STORE_ACCESS_FAULT :: MCause
+pattern INSTRUCTION_ADDRESS_MISALIGNED = MCause False 0
 pattern INSTRUCTION_ACCESS_FAULT = MCause False 1
+pattern ILLEGAL_INSTRUCTION = MCause False 2
+pattern BREAKPOINT = MCause False 3
+pattern LOAD_ADDRESS_MISALIGNED = MCause False 4
+pattern LOAD_ACCESS_FAULT = MCause False 5
+pattern STORE_ADDRESS_MISALIGNED = MCause False 6
+pattern STORE_ACCESS_FAULT = MCause False 7
 
 data Opcode
   = LUI
@@ -216,3 +240,38 @@ data BranchCondition
                   , ConstrRepr 'BIllegal 0              0     []
                   ]) #-}
 deriveBitPack [t| BranchCondition |]
+
+
+newtype CSRRegister = CSRRegister (BitVector 12)
+
+-- Machine Trap Setup
+pattern MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH :: CSRRegister
+
+pattern MSTATUS    = CSRRegister 0x300 -- Machine status register
+pattern MISA       = CSRRegister 0x301 -- ISA and extensions
+pattern MEDELEG    = CSRRegister 0x302 -- Machine exception delegation register
+pattern MIDELEG    = CSRRegister 0x303 -- Machine interrupt delegation register
+pattern MIE        = CSRRegister 0x304 -- Machine interrupt enable register
+pattern MTVEC      = CSRRegister 0x305 -- Machine trap-handler base address
+pattern MCOUNTEREN = CSRRegister 0x306 -- Machine counter enable
+pattern MSTATUSH   = CSRRegister 0x307 -- Additional machine status register, RV32 only
+
+-- Machine Trap Handling
+pattern MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2 :: CSRRegister
+
+pattern MSCRATCH = CSRRegister 0x340 -- Scratch register for machine trap handlers
+pattern MEPC     = CSRRegister 0x341 -- Machine exception program counter
+pattern MCAUSE   = CSRRegister 0x342 -- Machine trap cause
+pattern MTVAL    = CSRRegister 0x343 -- Machine bad address instruction
+pattern MIP      = CSRRegister 0x344 -- Machine interrupt pending
+pattern MTINST   = CSRRegister 0x34A -- Machine trap instruction (transformed)
+pattern MTVAL2   = CSRRegister 0x34B -- Machine bad guest physical address
+
+-- { mstatus = MStatus { mie = False, mpie = False }
+--     , mcause = MCause { interrupt = False, code = 0 }
+--     , mtvec = Direct 0
+--     , mie = Mie { meie = False, mtie = False, msie = False }
+--     , mscratch = 0
+--     , mepc = 0
+--     , mtval = 0
+--     }

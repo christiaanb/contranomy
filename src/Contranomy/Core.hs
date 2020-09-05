@@ -203,13 +203,13 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
         SLL  -> aluArg1 `shiftL` unpack (zeroExtend shamt)
         SLT  -> boolToMachineWord ((unpack aluArg1 :: Signed 32) < unpack aluArg2)
         SLTU -> boolToMachineWord (aluArg1 < aluArg2)
-        XOR  -> aluArg2 `xor` aluArg2
+        XOR  -> aluArg1 `xor` aluArg2
         SR   -> case srla of
                   Logical    -> aluArg1 `shiftR` unpack (zeroExtend shamt)
                   Arithmetic -> pack ((unpack aluArg1 :: Signed 32) `shiftR`
                                 unpack (zeroExtend shamt))
         OR   -> aluArg1 .|. aluArg2
-        AND  -> aluArg2 .&. aluArg2
+        AND  -> aluArg1 .&. aluArg2
 
       (dBusM2S,ldVal,dataFault,addrUnaligned,lsFinished) =
         loadStoreUnit instruction aluIResult rs2Val dBusS2M
@@ -227,7 +227,8 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
         LOAD     -> ldVal
         _        -> Just aluIResult
 
-  trap <- handleExceptions s opcode instrFault dataFault addrUnaligned psMisaligned pcN
+  trap <- handleExceptions s opcode instrFault dataFault addrUnaligned
+            psMisaligned lsFinished pcN
 
   let registerWrite = if trap || rd == X0 then Nothing else (rd,) <$> rdVal
 
@@ -235,10 +236,12 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
     #rvfiOrder += 1
     #stage .= InstructionFetch
 
+  pcN1 <- use #pc
+
   return . (,(rs1,rs2,registerWrite)) $ defCoreOut
          { dBusM2S = dBusM2S
          , rvfi = toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val
-                    registerWrite pc pcN dBusM2S dBusS2M
+                    registerWrite pc pcN1 dBusM2S dBusS2M
          }
 
 
@@ -260,7 +263,7 @@ toRVFI ::
   -- pc
   PC ->
   -- pcN
-  (PC,BitVector 2) ->
+  PC ->
   -- dbusM2S
   WishBoneM2S 4 30 ->
   -- dbusS2M
@@ -276,10 +279,10 @@ toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val rdVal pc pcN dBusM2S 
   , rs2Addr  = rs2
   , rs1RData = rs1Val
   , rs2RData = rs2Val
-  , rdAddr   = rd
+  , rdAddr   = maybe X0 fst rdVal
   , rdWData  = maybe 0 snd rdVal
   , pcRData  = pc ++# 0
-  , pcWData  = uncurry (++#) pcN
+  , pcWData  = pcN ++# 0
   , memAddr  = if trap then 0 else addr dBusM2S ++# 0
   , memRMask = if strobe dBusM2S && not (writeEnable dBusM2S) then
                   select dBusM2S
@@ -299,7 +302,7 @@ toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val rdVal pc pcN dBusM2S 
                   0
   }
  where
-  DecodedInstruction {rs1,rs2,rd} = decodeInstruction instruction
+  DecodedInstruction {rs1,rs2} = decodeInstruction instruction
 
 handleExceptions ::
   CoreState ->
@@ -312,11 +315,13 @@ handleExceptions ::
   Bool ->
   -- pcUnalignedFault
   Bool ->
+  -- lsFinished
+  Bool ->
   -- Next PC
   (PC,BitVector 2) ->
   State CoreState Bool
 handleExceptions CoreState{pc,machineState} opcode instrFault dataFault
-  addrMisaligned pcMisaligned (pcN,align) = do
+  addrMisaligned pcMisaligned lsFinished (pcN,align) = do
     let trap = instrFault || dataFault || addrMisaligned || pcMisaligned
     let MachineState{mstatus=MStatus{mie},mtvec} = machineState
 
@@ -345,7 +350,8 @@ handleExceptions CoreState{pc,machineState} opcode instrFault dataFault
                      }
       #pc .= 0 ++# slice d29 d2 (trapBase mtvec)
     else do
-      #pc .= pcN
+      when lsFinished $
+        #pc .= pcN
 
     return trap
 

@@ -174,7 +174,7 @@ data Opcode
                   , ConstrRepr 'JALR     (6 `downto` 0) 0b1100111 []
                   , ConstrRepr 'BRANCH   (6 `downto` 0) 0b1100011 []
                   , ConstrRepr 'LOAD     (6 `downto` 0) 0b0000011 []
-                  , ConstrRepr 'STORE    (6 `downto` 0) 0b0100000 []
+                  , ConstrRepr 'STORE    (6 `downto` 0) 0b0100011 []
                   , ConstrRepr 'OP_IMM   (6 `downto` 0) 0b0010011 []
                   , ConstrRepr 'OP       (6 `downto` 0) 0b0110011 []
                   , ConstrRepr 'MISC_MEM (6 `downto` 0) 0b0001111 []

@@ -15,17 +15,17 @@ mealyAuto transition start =
         in  o
 {-# INLINE mealyAuto #-}
 
-withState :: s -> State s o -> (o,s)
-withState s m = runState m s
-{-# INLINE withState #-}
+runState' :: s -> State s o -> (o,s)
+runState' s m = runState m s
+{-# INLINE runState' #-}
 
 mealyAutoB ::
   (HiddenClockResetEnable dom, AutoReg s, Bundle i, Bundle o) =>
-  (s -> i -> (s,o)) ->
+  (s -> i -> (o,s)) ->
   s ->
   (Unbundled dom i -> Unbundled dom o)
 mealyAutoB transition start =
-  \i -> let (sN,o) = unbundle (transition <$> s <*> (bundle i))
+  \i -> let (o,sN) = unbundle (transition <$> s <*> (bundle i))
             s      = setName @"core" autoReg start sN
         in  unbundle o
 {-# INLINE mealyAutoB #-}

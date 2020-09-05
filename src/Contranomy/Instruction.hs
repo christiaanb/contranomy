@@ -43,12 +43,16 @@ module Contranomy.Instruction
       ( MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH
       , MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2
       ,.. )
+  , CSRType
+      ( ReadWrite
+      , ReadSet
+      , ReadClear
+      )
   )
 where
 
 import Data.Function
 
-import Clash.Class.AutoReg (AutoReg)
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
@@ -267,11 +271,17 @@ pattern MIP      = CSRRegister 0x344 -- Machine interrupt pending
 pattern MTINST   = CSRRegister 0x34A -- Machine trap instruction (transformed)
 pattern MTVAL2   = CSRRegister 0x34B -- Machine bad guest physical address
 
--- { mstatus = MStatus { mie = False, mpie = False }
---     , mcause = MCause { interrupt = False, code = 0 }
---     , mtvec = Direct 0
---     , mie = Mie { meie = False, mtie = False, msie = False }
---     , mscratch = 0
---     , mepc = 0
---     , mtval = 0
---     }
+data CSRType
+  = ReadWrite
+  | ReadSet
+  | ReadClear
+  | CSRIllegal
+{-# ANN module (DataReprAnn
+                  $(liftQ [t|CSRType|])
+                  2
+                  [ ConstrRepr 'ReadWrite  (1 `downto` 0) 0b01 []
+                  , ConstrRepr 'ReadSet    (1 `downto` 0) 0b10 []
+                  , ConstrRepr 'ReadClear  (1 `downto` 0) 0b11 []
+                  , ConstrRepr 'CSRIllegal 0              0    []
+                  ]) #-}
+deriveBitPack [t| CSRType |]

@@ -18,6 +18,7 @@ module Contranomy.Core where
 import Control.Lens
 import Data.Generics.Labels ()
 import Data.Maybe
+import Control.Monad
 
 import Clash.Annotations.BitRepresentation
 import Clash.Annotations.BitRepresentation.Deriving
@@ -187,7 +188,7 @@ transition s@CoreState{stage=Execute False, pc, machineState} _ = withState s do
 
 transition s@CoreState{stage=Execute True,instruction,registers,pc} CoreIn{dBusS2M} = withState s do
   let DecodedInstruction
-        { opcode, rd, rs1, rs2, iop, srla, shamt, isSub, imm12I, imm20U, imm12S, func3 }
+        { opcode, rd, rs1, rs2, iop, srla, shamt, isSub, imm12I, imm20U, imm20J, imm12S, imm12B, func3 }
         = decodeInstruction instruction
 
       (rs1Val,rs2Val) = readRegisterFile registers rs1 rs2
@@ -226,15 +227,23 @@ transition s@CoreState{stage=Execute True,instruction,registers,pc} CoreIn{dBusS
       (dBusM2S,ldVal,busErr,addrUnaligned,lsFinished) =
         loadStoreUnit opcode func3 aluIResult rs2Val dBusS2M
 
+      (pcN,pcUnaligned) = branchUnit opcode func3 rs1Val rs2Val imm12B imm12I imm20J pc
+
       rdVal = case opcode of
         BRANCH   -> Nothing
         MISC_MEM -> Nothing
         SYSTEM   -> Nothing
         STORE    -> Nothing
         LOAD     -> ldVal
-        _        -> Just aluIResult
+        _        -> if pcUnaligned then
+                      Nothing
+                    else
+                      Just aluIResult
 
   #registers .= writeRegisterFile registers ((rd,) <$> rdVal)
+
+  when lsFinished $
+    #stage .= InstructionFetch
 
   return $ defCoreOut
          { dBusM2S = dBusM2S }
@@ -282,7 +291,7 @@ loadStoreUnit opcode func3 addr store dBusS2M = case opcode of
         Just loadData
     , err dBusS2M
     , unaligned
-    , acknowledge dBusS2M
+    , lsFinished
     )
   STORE -> let
     storeData = case lsw of
@@ -301,7 +310,7 @@ loadStoreUnit opcode func3 addr store dBusS2M = case opcode of
     , Nothing
     , err dBusS2M
     , unaligned
-    , acknowledge dBusS2M
+    , lsFinished
     )
   _ ->
     ( defM2S
@@ -311,6 +320,8 @@ loadStoreUnit opcode func3 addr store dBusS2M = case opcode of
     , True
     )
  where
+  lsFinished = unaligned || err dBusS2M || acknowledge dBusS2M
+
   lsw = unpack (slice d1 d0 func3)
 
   alignment = slice d1 d0 addr
@@ -341,6 +352,64 @@ loadStoreUnit opcode func3 addr store dBusS2M = case opcode of
               2 -> 16
               1 -> 8
               _ -> 0
+
+branchUnit ::
+  Opcode ->
+  -- func 3
+  BitVector 3 ->
+  -- rs1
+  MachineWord ->
+  -- rs2
+  MachineWord ->
+  -- imm12B
+  BitVector 12 ->
+  -- imm12I
+  BitVector 12 ->
+  -- imm20J
+  BitVector 20 ->
+  -- PC
+  PC ->
+  (PC, Bool)
+branchUnit opcode func3 rs1 rs2 imm12B imm12I imm20J pc = case opcode of
+  BRANCH ->
+    let taken = case unpack func3 of
+                  BEQ -> rs1 == rs2
+                  BNE -> rs1 /= rs2
+                  BLT -> (unpack rs1 :: Signed 32) < unpack rs2
+                  BLTU -> rs1 < rs2
+                  BGE -> (unpack rs1 :: Signed 32) >= unpack rs2
+                  BGEU -> rs1 >= rs2
+                  _ -> False
+     in if taken then
+          let (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
+           in (pc + offset, align /= 0)
+        else
+          (pc + 1, False)
+
+  JAL ->
+    let (offset,align) = split (signExtend imm20J `shiftL` 1 :: MachineWord)
+     in (pc + offset, align /= 0)
+
+  JALR ->
+    let (pcN, align) = split (rs1 + signExtend imm12I)
+     in (pcN, testBit align 1)
+
+  _ ->
+    (pc + 1, False)
+
+
+csrUnit ::
+  Opcode ->
+  -- func 3
+  BitVector 3 ->
+  -- rs1
+  MachineWord ->
+  -- uimm
+  BitVector 5 ->
+  -- func 12
+  BitVector 12 ->
+  ()
+csrUnit = csrUnit
 
 data DecodedInstruction
   = DecodedInstruction

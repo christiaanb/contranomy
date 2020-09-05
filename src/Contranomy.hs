@@ -11,6 +11,7 @@ import Clash.Prelude
 import Clash.Annotations.TH
 
 import Contranomy.Core
+import Contranomy.RegisterFile
 
 createDomain vXilinxSystem{vName="Core", vPeriod=hzToPeriod 100e6}
 
@@ -19,6 +20,9 @@ contranomy ::
   "reset" ::: Reset Core ->
   ( "" ::: Signal Core CoreIn) ->
   ( "" ::: Signal Core CoreOut)
-contranomy clk rst = exposeClockResetEnable core clk rst enableGen
+contranomy clk rst coreIn = withClockResetEnable clk rst enableGen $
+  let (coreOut,regWrite) = core (coreIn,regOut)
+      regOut = registerFile regWrite
+   in coreOut
 
 makeTopEntity 'contranomy

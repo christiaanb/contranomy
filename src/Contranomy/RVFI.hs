@@ -2,7 +2,7 @@ module Contranomy.RVFI where
 
 import Clash.Prelude
 
-import Contranomy.RV32IM
+import Contranomy.Instruction
 
 data RVFI
   = RVFI

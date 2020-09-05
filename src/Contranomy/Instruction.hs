@@ -20,6 +20,14 @@ module Contranomy.Instruction
   , Register (..)
   , MCause (..,INSTRUCTION_ACCESS_FAULT)
   , LoadStoreWidth (..)
+  , BranchCondition
+      ( BEQ
+      , BNE
+      , BLT
+      , BGE
+      , BLTU
+      , BGEU
+      )
   )
 where
 
@@ -187,3 +195,24 @@ data LoadStoreWidth
 
 deriveDefaultAnnotation [t|LoadStoreWidth|]
 deriveBitPack  [t|LoadStoreWidth|]
+
+data BranchCondition
+  = BEQ
+  | BNE
+  | BLT
+  | BGE
+  | BLTU
+  | BGEU
+  | BIllegal
+{-# ANN module (DataReprAnn
+                  $(liftQ [t|BranchCondition|])
+                  3
+                  [ ConstrRepr 'BEQ      (2 `downto` 0) 0b000 []
+                  , ConstrRepr 'BNE      (2 `downto` 0) 0b001 []
+                  , ConstrRepr 'BLT      (2 `downto` 0) 0b100 []
+                  , ConstrRepr 'BGE      (2 `downto` 0) 0b101 []
+                  , ConstrRepr 'BLTU     (2 `downto` 0) 0b110 []
+                  , ConstrRepr 'BGEU     (2 `downto` 0) 0b111 []
+                  , ConstrRepr 'BIllegal 0              0     []
+                  ]) #-}
+deriveBitPack [t| BranchCondition |]

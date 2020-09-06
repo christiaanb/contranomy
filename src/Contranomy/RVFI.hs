@@ -27,6 +27,16 @@ data RVFI
   , memWMask :: "rvfi_mem_wmask" ::: BitVector 4
   , memRData :: "rvfi_mem_rdata" ::: BitVector 32
   , memWData :: "rvfi_mem_wdata" ::: BitVector 32
+  , misaCSR  :: "rvfi_csr_misa"  ::: RVFICSR
+  }
+  deriving Show
+
+data RVFICSR
+  = RVFICSR
+  { rmask :: "rmask" ::: BitVector 32
+  , wmask :: "wmask" ::: BitVector 32
+  , rdata :: "rdata" ::: BitVector 32
+  , wdata :: "wdata" ::: BitVector 32
   }
   deriving Show
 
@@ -54,4 +64,14 @@ defRVFI
   , memWMask = 0
   , memRData = 0
   , memWData = 0
+  , misaCSR  = defRVFICSR
+  }
+
+defRVFICSR :: RVFICSR
+defRVFICSR
+  = RVFICSR
+  { rmask = 0
+  , wmask = 0
+  , rdata = 0
+  , wdata = 0
   }

@@ -239,7 +239,8 @@ transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
 
   pcN <- branchUnit instruction rs1Val rs2Val pc machineState
 
-  csrVal@(csrOld,_) <- csrUnit instruction rs1Val machineState
+  csrVal@(csrOld,_) <-
+    csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
 
   let rdVal = case opcode of
         BRANCH   -> Nothing
@@ -398,9 +399,7 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
         timerInterrupt1 = timerInterrupt && mtie
         softwareInterrupt1 = softwareInterrupt && msie
         externalInterrupt1 = (externalInterrupt .&. irqmask /= 0) && meie
-    let interrupt = timerInterrupt1 ||
-                    softwareInterrupt1 ||
-                    externalInterrupt1
+    let interrupt = mie && (timerInterrupt1 || softwareInterrupt1 || externalInterrupt1)
     let DecodedInstruction{opcode} = decodeInstruction instruction
 
     if trap || interrupt then do
@@ -611,8 +610,11 @@ csrUnit ::
   BitVector 32 ->
   MachineWord ->
   MachineState ->
+  Bool ->
+  Bool ->
+  MachineWord ->
   State CoreState (Maybe MachineWord, MachineWord)
-csrUnit instruction rs1Val machineState
+csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
   | SYSTEM <- opcode
   , func3 /= 0
   = zoom #machineState do
@@ -648,6 +650,12 @@ csrUnit instruction rs1Val machineState
         return (Just oldValue, newValue)
       MISA -> do
         let oldValue = bit 30 .|. bit 8
+            newValue = csrWrite csrType oldValue writeValue1
+        return (Just oldValue, newValue)
+      MIP -> do
+        let oldValue = bitB (externalInterrupt /= 0) 11 .|.
+                       bitB timerInterrupt 7 .|.
+                       bitB softwareInterrupt 3
             newValue = csrWrite csrType oldValue writeValue1
         return (Just oldValue, newValue)
       MIE -> do
@@ -688,6 +696,9 @@ csrUnit instruction rs1Val machineState
             newValue = csrWrite csrType oldValue writeValue1
         #irqmask .= newValue
         return (Just oldValue, newValue)
+      IRQPENDING -> do
+        let newValue = csrWrite csrType externalInterrupt writeValue1
+        return (Just externalInterrupt, newValue)
       _ -> return (Nothing, undefined)
 
   | otherwise
@@ -706,7 +717,7 @@ csrUnit instruction rs1Val machineState
   csrWrite ReadSet oldValue newValueM   = maybe oldValue (oldValue .|.) newValueM
   csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
   csrWrite _ oldValue _ = oldValue
-  {-# INLINE csrWrite #-}
+  {-# NOINLINE csrWrite #-}
 
 data DecodedInstruction
   = DecodedInstruction

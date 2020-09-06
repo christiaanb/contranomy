@@ -335,12 +335,12 @@ toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val rdVal pc pcN dBusM2S 
                 else
                   0
   , misaCSR  = case csrVal of
-      (Just old,new)
+      (Just old,newVal)
         | MISA <- CSRRegister srcDest
         -> RVFICSR { rmask = maxBound
                    , wmask = maxBound
                    , rdata = old
-                   , wdata = new
+                   , wdata = newVal
                    }
       _ -> defRVFICSR {rmask = 4}
   }
@@ -717,7 +717,7 @@ csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externa
   csrWrite ReadSet oldValue newValueM   = maybe oldValue (oldValue .|.) newValueM
   csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
   csrWrite _ oldValue _ = oldValue
-  {-# NOINLINE csrWrite #-}
+  {-# INLINE csrWrite #-}
 
 data DecodedInstruction
   = DecodedInstruction

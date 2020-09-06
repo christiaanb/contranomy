@@ -81,6 +81,7 @@ data MachineState
   , mscratch :: MachineWord
   , mepc :: PC
   , mtval :: MachineWord
+  , irqmask :: MachineWord
   }
   deriving (Generic, NFDataX)
 
@@ -146,6 +147,7 @@ core = mealyAutoB transition cpuStart
     , mscratch = 0
     , mepc = 0
     , mtval = 0
+    , irqmask = 0
     }
 
 transition ::
@@ -153,9 +155,15 @@ transition ::
   (CoreIn, (MachineWord, MachineWord)) ->
   ( (CoreOut, (Register, Register, Maybe (Register, MachineWord)), RVFI)
   , CoreState )
-transition s@CoreState{stage=InstructionFetch, pc} (CoreIn{iBusS2M},_) = runState' s do
+transition
+  s@CoreState{stage=InstructionFetch, pc}
+  (CoreIn{iBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},_) = runState' s do
+
   let exceptionIn = defExceptionIn
-                      { instrAccessFault = err iBusS2M
+                      { instrAccessFault  = err iBusS2M
+                      , softwareInterrupt = softwareInterrupt
+                      , timerInterrupt    = timerInterrupt
+                      , externalInterrupt = externalInterrupt
                       }
   (trap,pcN) <- handleExceptions s exceptionIn (pc,0)
 
@@ -177,13 +185,15 @@ transition s@CoreState{stage=InstructionFetch, pc} (CoreIn{iBusS2M},_) = runStat
                    , cycle  = True
                    , strobe = True } }
 
+
 transition s@CoreState{stage=Decode,instruction} _ = runState' s do
   #stage .= Execute
   let DecodedInstruction {rs1,rs2} = decodeInstruction instruction
   return (defCoreOut,(rs1,rs2,Nothing),defRVFI)
 
+
 transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
-  (CoreIn{dBusS2M},(rs1Val,rs2Val)) = runState' s do
+  (CoreIn{dBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},(rs1Val,rs2Val)) = runState' s do
   let DecodedInstruction
         { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S, func3 }
         = decodeInstruction instruction
@@ -344,6 +354,9 @@ data ExceptionIn
   , dataAddrMisaligned  :: Bool
   , breakpoint          :: Bool
   , eCall               :: Bool
+  , timerInterrupt      :: Bool
+  , softwareInterrupt   :: Bool
+  , externalInterrupt   :: BitVector 32
   }
 
 defExceptionIn :: ExceptionIn
@@ -355,6 +368,9 @@ defExceptionIn
   , dataAddrMisaligned  = False
   , breakpoint          = False
   , eCall               = False
+  , timerInterrupt      = False
+  , softwareInterrupt   = False
+  , externalInterrupt   = 0
   }
 
 handleExceptions ::
@@ -371,38 +387,64 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
           , dataAddrMisaligned
           , breakpoint
           , eCall
+          , timerInterrupt
+          , softwareInterrupt
+          , externalInterrupt
           } = exceptionIn
     let trap = instrAccessFault || instrAddrMisaligned || dataAccessFault ||
                dataAddrMisaligned || breakpoint || eCall
-    let MachineState{mstatus=MStatus{mie},mtvec} = machineState
+    let MachineState{mstatus=MStatus{mie},mie=Mie{mtie,msie,meie},mtvec,irqmask} = machineState
+
+        timerInterrupt1 = timerInterrupt && mtie
+        softwareInterrupt1 = softwareInterrupt && msie
+        externalInterrupt1 = (externalInterrupt .&. irqmask /= 0) && meie
+    let interrupt = timerInterrupt1 ||
+                    softwareInterrupt1 ||
+                    externalInterrupt1
     let DecodedInstruction{opcode} = decodeInstruction instruction
 
-    if trap then do
+    if trap || interrupt then do
       #machineState .= machineState
                      { mstatus = MStatus { mpie = mie, mie = False }
-                     , mcause  = if instrAccessFault then
-                                   INSTRUCTION_ACCESS_FAULT
-                                 else if instrAddrMisaligned then
-                                   INSTRUCTION_ADDRESS_MISALIGNED
-                                 else if eCall then
-                                   ENVIRONMENT_CALL
-                                 else if breakpoint then
-                                   BREAKPOINT
-                                 else if dataAddrMisaligned then
-                                   case opcode of
-                                     LOAD -> LOAD_ADDRESS_MISALIGNED
-                                     _ -> STORE_ADDRESS_MISALIGNED
-                                 else -- dataFault
-                                   case opcode of
-                                     LOAD -> LOAD_ACCESS_FAULT
-                                     _ -> STORE_ACCESS_FAULT
-
-
-                     , mepc    = pc ++# 0
-                     , mtval   = if instrAddrMisaligned then
-                                  pcN ++# align
-                                else
-                                  pc ++# 0
+                     , mcause =
+                        if interrupt then
+                          if softwareInterrupt1 then
+                            MACHINE_SOFTWARE_INTERRUPT
+                          else if timerInterrupt1 then
+                            MACHINE_TIMER_INTERRUPT
+                          else -- externalInterrupt1
+                            MACHINE_EXTERNAL_INTERRUPT
+                        else
+                          if instrAccessFault then
+                            INSTRUCTION_ACCESS_FAULT
+                          else if instrAddrMisaligned then
+                            INSTRUCTION_ADDRESS_MISALIGNED
+                          else if eCall then
+                            ENVIRONMENT_CALL
+                          else if breakpoint then
+                            BREAKPOINT
+                          else if dataAddrMisaligned then
+                            case opcode of
+                              LOAD -> LOAD_ADDRESS_MISALIGNED
+                              _ -> STORE_ADDRESS_MISALIGNED
+                          else -- dataFault
+                            case opcode of
+                              LOAD -> LOAD_ACCESS_FAULT
+                              _ -> STORE_ACCESS_FAULT
+                     , mepc = pc ++# 0
+                     , mtval =
+                        if instrAddrMisaligned then
+                          pcN ++# align
+                        else if instrAccessFault then
+                          pc ++# 0
+                        else if dataAccessFault then
+                          pc ++# 0
+                        else if dataAddrMisaligned then
+                          pc ++# 0
+                        else if breakpoint then
+                          pc ++# 0
+                        else
+                          0
                      }
       let pcN1 = zeroExtend (slice d29 d2 (trapBase mtvec))
       return (True,pcN1)
@@ -582,6 +624,7 @@ csrUnit instruction rs1Val machineState
           ,mcause=MCause{interrupt,code}
           ,mtval
           ,mepc
+          ,irqmask
           } = machineState
 
     let csrType = unpack (slice d1 d0 func3)
@@ -639,6 +682,11 @@ csrUnit instruction rs1Val machineState
         let oldValue = mtval
             newValue = csrWrite csrType oldValue writeValue1
         #mtval .= newValue
+        return (Just oldValue, newValue)
+      IRQMASK -> do
+        let oldValue = irqmask
+            newValue = csrWrite csrType oldValue writeValue1
+        #irqmask .= newValue
         return (Just oldValue, newValue)
       _ -> return (Nothing, undefined)
 

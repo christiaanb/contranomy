@@ -30,6 +30,9 @@ module Contranomy.Instruction
       , STORE_ADDRESS_MISALIGNED
       , STORE_ACCESS_FAULT
       , ENVIRONMENT_CALL
+      , MACHINE_SOFTWARE_INTERRUPT
+      , MACHINE_TIMER_INTERRUPT
+      , MACHINE_EXTERNAL_INTERRUPT
       )
   , LoadStoreWidth (..)
   , BranchCondition
@@ -43,6 +46,7 @@ module Contranomy.Instruction
   , CSRRegister
       ( MSTATUS, MISA, MEDELEG, MIDELEG, MIE, MTVEC, MCOUNTEREN, MSTATUSH
       , MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2
+      , IRQMASK, IRQPENDING
       ,.. )
   , CSRType
       ( ReadWrite
@@ -141,7 +145,8 @@ deriveAutoReg ''MCause
 
 pattern INSTRUCTION_ADDRESS_MISALIGNED, INSTRUCTION_ACCESS_FAULT, ILLEGAL_INSTRUCTION,
   BREAKPOINT, LOAD_ADDRESS_MISALIGNED, LOAD_ACCESS_FAULT, STORE_ADDRESS_MISALIGNED,
-  STORE_ACCESS_FAULT, ENVIRONMENT_CALL :: MCause
+  STORE_ACCESS_FAULT, ENVIRONMENT_CALL, MACHINE_SOFTWARE_INTERRUPT,
+  MACHINE_TIMER_INTERRUPT, MACHINE_EXTERNAL_INTERRUPT :: MCause
 pattern INSTRUCTION_ADDRESS_MISALIGNED = MCause False 0
 pattern INSTRUCTION_ACCESS_FAULT = MCause False 1
 pattern ILLEGAL_INSTRUCTION = MCause False 2
@@ -151,6 +156,9 @@ pattern LOAD_ACCESS_FAULT = MCause False 5
 pattern STORE_ADDRESS_MISALIGNED = MCause False 6
 pattern STORE_ACCESS_FAULT = MCause False 7
 pattern ENVIRONMENT_CALL = MCause False 11
+pattern MACHINE_SOFTWARE_INTERRUPT = MCause True 3
+pattern MACHINE_TIMER_INTERRUPT = MCause True 7
+pattern MACHINE_EXTERNAL_INTERRUPT = MCause True 11
 
 data Opcode
   = LUI
@@ -272,6 +280,12 @@ pattern MTVAL    = CSRRegister 0x343 -- Machine bad address instruction
 pattern MIP      = CSRRegister 0x344 -- Machine interrupt pending
 pattern MTINST   = CSRRegister 0x34A -- Machine trap instruction (transformed)
 pattern MTVAL2   = CSRRegister 0x34B -- Machine bad guest physical address
+
+-- Architecture specific
+pattern IRQMASK, IRQPENDING :: CSRRegister
+
+pattern IRQMASK    = CSRRegister 0x330
+pattern IRQPENDING = CSRRegister 0x360
 
 data CSRType
   = ReadWrite

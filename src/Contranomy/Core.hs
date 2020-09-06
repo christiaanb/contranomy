@@ -9,6 +9,7 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -35,8 +36,8 @@ type PC = BitVector 30
 
 data CoreStage
   = InstructionFetch
-  | Decode Bool
-  | Execute Bool
+  | Decode
+  | Execute
   deriving (Generic, NFDataX, AutoReg)
 
 data MStatus
@@ -114,16 +115,17 @@ data CoreOut
   = CoreOut
   { iBusM2S :: "iBusWishbone" ::: WishBoneM2S 4 30
   , dBusM2S :: "dBusWishbone" ::: WishBoneM2S 4 30
-  , rvfi :: "" ::: RVFI
   }
 
 defCoreOut :: CoreOut
-defCoreOut = CoreOut { iBusM2S = defM2S, dBusM2S = defM2S, rvfi = defRVFI }
+defCoreOut = CoreOut { iBusM2S = defM2S, dBusM2S = defM2S }
 
 core ::
   HiddenClockResetEnable dom =>
   (Signal dom CoreIn, Signal dom (MachineWord, MachineWord)) ->
-  (Signal dom CoreOut, Signal dom (Register, Register, Maybe (Register, MachineWord)))
+  ( Signal dom CoreOut
+  , Signal dom (Register, Register, Maybe (Register, MachineWord))
+  , Signal dom RVFI )
 core = mealyAutoB transition cpuStart
  where
   cpuStart
@@ -149,34 +151,41 @@ core = mealyAutoB transition cpuStart
 transition ::
   CoreState ->
   (CoreIn, (MachineWord, MachineWord)) ->
-  ( (CoreOut, (Register, Register, Maybe (Register, MachineWord)))
+  ( (CoreOut, (Register, Register, Maybe (Register, MachineWord)), RVFI)
   , CoreState )
 transition s@CoreState{stage=InstructionFetch, pc} (CoreIn{iBusS2M},_) = runState' s do
-  #stage .= if err iBusS2M then
-              Decode True
+  let exceptionIn = defExceptionIn
+                      { instrAccessFault = err iBusS2M
+                      }
+  (trap,pcN) <- handleExceptions s exceptionIn (pc,0)
+
+  #stage .= if trap then
+              InstructionFetch
             else if acknowledge iBusS2M then
-              Decode False
+              Decode
             else
               InstructionFetch
 
+  #pc .= pcN
+
   #instruction .= readData iBusS2M
 
-  return . (,(undefined,undefined,Nothing)) $ defCoreOut
+  return . (,(undefined,undefined,Nothing),defRVFI) $ defCoreOut
          { iBusM2S = defM2S
                    { addr   = pc
                    , select = 0b1111
                    , cycle  = True
                    , strobe = True } }
 
-transition s@CoreState{stage=Decode instrFault,instruction} _ = runState' s do
-  #stage .= Execute instrFault
+transition s@CoreState{stage=Decode,instruction} _ = runState' s do
+  #stage .= Execute
   let DecodedInstruction {rs1,rs2} = decodeInstruction instruction
-  return (defCoreOut,(rs1,rs2,Nothing))
+  return (defCoreOut,(rs1,rs2,Nothing),defRVFI)
 
-transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfiOrder}
+transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
   (CoreIn{dBusS2M},(rs1Val,rs2Val)) = runState' s do
   let DecodedInstruction
-        { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S }
+        { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S, func3 }
         = decodeInstruction instruction
 
       aluArg1 = case opcode of
@@ -215,13 +224,12 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
         OR   -> aluArg1 .|. aluArg2
         AND  -> aluArg1 .&. aluArg2
 
-      (dBusM2S,ldVal,dataFault,addrUnaligned,lsFinished) =
+      (dBusM2S,ldVal,dataAccessFault,dataAddrMisaligned,lsFinished) =
         loadStoreUnit instruction aluIResult rs2Val dBusS2M
 
-      pcN = branchUnit instruction rs1Val rs2Val pc
-      psMisaligned = snd pcN /= 0
+  pcN <- branchUnit instruction rs1Val rs2Val pc machineState
 
-  csrVal@(csrOld,_) <- csrUnit instruction instrFault rs1Val machineState
+  csrVal@(csrOld,_) <- csrUnit instruction rs1Val machineState
 
   let rdVal = case opcode of
         BRANCH   -> Nothing
@@ -231,8 +239,18 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
         LOAD     -> ldVal
         _        -> Just aluIResult
 
-  (trap,pcN1) <-
-    handleExceptions s opcode instrFault dataFault addrUnaligned psMisaligned pcN
+  let exceptionIn = defExceptionIn
+                      { instrAddrMisaligned = snd pcN /= 0
+                      , dataAccessFault = dataAccessFault
+                      , dataAddrMisaligned = dataAddrMisaligned
+                      , breakpoint = case opcode of
+                          SYSTEM | func3 == 0 -> imm12I == 1
+                          _ -> False
+                      , eCall = case opcode of
+                          SYSTEM | func3 == 0 -> imm12I == 0
+                          _ -> False
+                      }
+  (trap,pcN1) <- handleExceptions s exceptionIn pcN
 
   let registerWrite = if trap || rd == X0 then Nothing else (rd,) <$> rdVal
 
@@ -241,12 +259,12 @@ transition s@CoreState{stage=Execute instrFault,instruction,pc,machineState,rvfi
     #rvfiOrder += 1
     #stage .= InstructionFetch
 
-  return . (,(rs1,rs2,registerWrite)) $ defCoreOut
-         { dBusM2S = dBusM2S
-         , rvfi = toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val
+  let rvfi = toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val
                     registerWrite pc pcN1 dBusM2S dBusS2M csrVal
-         }
 
+  return . (,(rs1,rs2,registerWrite),rvfi) $ defCoreOut
+         { dBusM2S = dBusM2S
+         }
 
 toRVFI ::
   -- lsFinished
@@ -318,33 +336,59 @@ toRVFI lsFinished rvfiOrder instruction trap rs1Val rs2Val rdVal pc pcN dBusM2S 
  where
   DecodedInstruction {rs1,rs2,imm12I=srcDest} = decodeInstruction instruction
 
+data ExceptionIn
+  = ExceptionIn
+  { instrAccessFault    :: Bool
+  , instrAddrMisaligned :: Bool
+  , dataAccessFault     :: Bool
+  , dataAddrMisaligned  :: Bool
+  , breakpoint          :: Bool
+  , eCall               :: Bool
+  }
+
+defExceptionIn :: ExceptionIn
+defExceptionIn
+  = ExceptionIn
+  { instrAccessFault    = False
+  , instrAddrMisaligned = False
+  , dataAccessFault     = False
+  , dataAddrMisaligned  = False
+  , breakpoint          = False
+  , eCall               = False
+  }
+
 handleExceptions ::
   CoreState ->
-  Opcode ->
-  -- instructionAccessFault
-  Bool ->
-  -- dataAccessFault
-  Bool ->
-  -- addrUnalignedFault
-  Bool ->
-  -- pcUnalignedFault
-  Bool ->
+  ExceptionIn ->
   -- Next PC
   (PC,BitVector 2) ->
   State CoreState (Bool,PC)
-handleExceptions CoreState{pc,machineState} opcode instrFault dataFault
-  addrMisaligned pcMisaligned (pcN,align) = do
-    let trap = instrFault || dataFault || addrMisaligned || pcMisaligned
+handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) = do
+    let ExceptionIn
+          { instrAccessFault
+          , instrAddrMisaligned
+          , dataAccessFault
+          , dataAddrMisaligned
+          , breakpoint
+          , eCall
+          } = exceptionIn
+    let trap = instrAccessFault || instrAddrMisaligned || dataAccessFault ||
+               dataAddrMisaligned || breakpoint || eCall
     let MachineState{mstatus=MStatus{mie},mtvec} = machineState
+    let DecodedInstruction{opcode} = decodeInstruction instruction
 
     if trap then do
       #machineState .= machineState
                      { mstatus = MStatus { mpie = mie, mie = False }
-                     , mcause  = if instrFault then
+                     , mcause  = if instrAccessFault then
                                    INSTRUCTION_ACCESS_FAULT
-                                 else if pcMisaligned then
+                                 else if instrAddrMisaligned then
                                    INSTRUCTION_ADDRESS_MISALIGNED
-                                 else if addrMisaligned then
+                                 else if eCall then
+                                   ENVIRONMENT_CALL
+                                 else if breakpoint then
+                                   BREAKPOINT
+                                 else if dataAddrMisaligned then
                                    case opcode of
                                      LOAD -> LOAD_ADDRESS_MISALIGNED
                                      _ -> STORE_ADDRESS_MISALIGNED
@@ -355,7 +399,7 @@ handleExceptions CoreState{pc,machineState} opcode instrFault dataFault
 
 
                      , mepc    = pc ++# 0
-                     , mtval   = if pcMisaligned then
+                     , mtval   = if instrAddrMisaligned then
                                   pcN ++# align
                                 else
                                   pc ++# 0
@@ -480,8 +524,9 @@ branchUnit ::
   MachineWord ->
   -- PC
   PC ->
-  (PC, BitVector 2)
-branchUnit instruction rs1Val rs2Val pc = case opcode of
+  MachineState ->
+  State CoreState (PC, BitVector 2)
+branchUnit instruction rs1Val rs2Val pc machineState = zoom #machineState case opcode of
   BRANCH ->
     let taken = case unpack func3 of
                   BEQ -> rs1Val == rs2Val
@@ -493,34 +538,40 @@ branchUnit instruction rs1Val rs2Val pc = case opcode of
                   _ -> False
      in if taken then
           let (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
-           in (pc + offset,align)
+           in return (pc + offset,align)
         else
-          (pc + 1, 0)
+          return (pc + 1, 0)
 
   JAL ->
     let (offset,align) = split (signExtend imm20J `shiftL` 1 :: MachineWord)
-     in (pc + offset, align)
+     in return (pc + offset, align)
 
   JALR ->
     let (pcN, align) = split (rs1Val + signExtend imm12I)
         alignLSBZero = align .&. 0b10
-     in (pcN, alignLSBZero)
+     in return (pcN, alignLSBZero)
+
+  SYSTEM -- MRET
+    | func3  == 0
+    , imm12I == 0b0011000_00010
+    -> do
+      let MachineState{mstatus=MStatus{mpie},mepc} = machineState
+      #mstatus .= MStatus {mie=mpie,mpie=True}
+      return (mepc, 0)
 
   _ ->
-    (pc + 1, 0)
+    return (pc + 1, 0)
  where
   DecodedInstruction {opcode,func3,imm12B,imm12I,imm20J} = decodeInstruction instruction
 
 
 csrUnit ::
   BitVector 32 ->
-  Bool ->
   MachineWord ->
   MachineState ->
   State CoreState (Maybe MachineWord, MachineWord)
-csrUnit instruction instrFault rs1Val machineState
-  | not instrFault
-  , SYSTEM <- opcode
+csrUnit instruction rs1Val machineState
+  | SYSTEM <- opcode
   , func3 /= 0
   = zoom #machineState do
     let MachineState

@@ -158,9 +158,13 @@ transition ::
 transition
   s@CoreState{stage=InstructionFetch, pc}
   (CoreIn{iBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},_) = runState' s do
+  #instruction .= readData iBusS2M
+
+  let DecodedInstruction {legal} = decodeInstruction (readData iBusS2M)
 
   let exceptionIn = defExceptionIn
                       { instrAccessFault  = err iBusS2M
+                      , instrIllegal      = acknowledge iBusS2M && not legal
                       , softwareInterrupt = softwareInterrupt
                       , timerInterrupt    = timerInterrupt
                       , externalInterrupt = externalInterrupt
@@ -175,8 +179,6 @@ transition
               InstructionFetch
 
   #pc .= pcN
-
-  #instruction .= readData iBusS2M
 
   return . (,(undefined,undefined,Nothing),defRVFI) $ defCoreOut
          { iBusM2S = defM2S
@@ -237,7 +239,7 @@ transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
       (dBusM2S,ldVal,dataAccessFault,dataAddrMisaligned,lsFinished) =
         loadStoreUnit instruction aluIResult rs2Val dBusS2M
 
-  pcN <- branchUnit instruction rs1Val rs2Val pc machineState
+  let pcN = branchUnit instruction rs1Val rs2Val pc
 
   csrVal@(csrOld,_) <-
     csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
@@ -259,6 +261,9 @@ transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
                           _ -> False
                       , eCall = case opcode of
                           SYSTEM | func3 == 0 -> imm12I == 0
+                          _ -> False
+                      , mret = case opcode of
+                          SYSTEM | func3 == 0 -> imm12I == 0b0011000_00010
                           _ -> False
                       }
   (trap,pcN1) <- handleExceptions s exceptionIn pcN
@@ -351,10 +356,12 @@ data ExceptionIn
   = ExceptionIn
   { instrAccessFault    :: Bool
   , instrAddrMisaligned :: Bool
-  , dataAccessFault     :: Bool
-  , dataAddrMisaligned  :: Bool
+  , instrIllegal        :: Bool
+  , dataAccessFault     :: Maybe MachineWord
+  , dataAddrMisaligned  :: Maybe MachineWord
   , breakpoint          :: Bool
   , eCall               :: Bool
+  , mret                :: Bool
   , timerInterrupt      :: Bool
   , softwareInterrupt   :: Bool
   , externalInterrupt   :: BitVector 32
@@ -365,10 +372,12 @@ defExceptionIn
   = ExceptionIn
   { instrAccessFault    = False
   , instrAddrMisaligned = False
-  , dataAccessFault     = False
-  , dataAddrMisaligned  = False
+  , instrIllegal        = False
+  , dataAccessFault     = Nothing
+  , dataAddrMisaligned  = Nothing
   , breakpoint          = False
   , eCall               = False
+  , mret                = False
   , timerInterrupt      = False
   , softwareInterrupt   = False
   , externalInterrupt   = 0
@@ -384,6 +393,7 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
     let ExceptionIn
           { instrAccessFault
           , instrAddrMisaligned
+          , instrIllegal
           , dataAccessFault
           , dataAddrMisaligned
           , breakpoint
@@ -391,14 +401,16 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
           , timerInterrupt
           , softwareInterrupt
           , externalInterrupt
+          , mret
           } = exceptionIn
-    let trap = instrAccessFault || instrAddrMisaligned || dataAccessFault ||
-               dataAddrMisaligned || breakpoint || eCall
-    let MachineState{mstatus=MStatus{mie},mie=Mie{mtie,msie,meie},mtvec,irqmask} = machineState
+    let trap = instrAccessFault || instrAddrMisaligned || instrIllegal ||
+               isJust dataAccessFault || isJust dataAddrMisaligned || breakpoint || eCall
+    let MachineState{mstatus,mie=Mie{mtie,msie,meie},mepc,mtvec,irqmask} = machineState
+        MStatus{mie,mpie} = mstatus
 
-        timerInterrupt1 = timerInterrupt && mtie
+        timerInterrupt1    = timerInterrupt && mtie
         softwareInterrupt1 = softwareInterrupt && msie
-        externalInterrupt1 = (externalInterrupt .&. irqmask /= 0) && meie
+        externalInterrupt1 = ((externalInterrupt .&. irqmask) /= 0) && meie
     let interrupt = mie && (timerInterrupt1 || softwareInterrupt1 || externalInterrupt1)
     let DecodedInstruction{opcode} = decodeInstruction instruction
 
@@ -416,37 +428,42 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
                         else
                           if instrAccessFault then
                             INSTRUCTION_ACCESS_FAULT
+                          else if instrIllegal then
+                            ILLEGAL_INSTRUCTION
                           else if instrAddrMisaligned then
                             INSTRUCTION_ADDRESS_MISALIGNED
                           else if eCall then
                             ENVIRONMENT_CALL
                           else if breakpoint then
                             BREAKPOINT
-                          else if dataAddrMisaligned then
-                            case opcode of
+                          else case dataAddrMisaligned of
+                            Just _ -> case opcode of
                               LOAD -> LOAD_ADDRESS_MISALIGNED
                               _ -> STORE_ADDRESS_MISALIGNED
-                          else -- dataFault
-                            case opcode of
-                              LOAD -> LOAD_ACCESS_FAULT
-                              _ -> STORE_ACCESS_FAULT
+                            _ -> case opcode of -- dataAccessFault
+                              LOAD -> LOAD_ADDRESS_MISALIGNED
+                              _ -> STORE_ADDRESS_MISALIGNED
                      , mepc = pc ++# 0
                      , mtval =
                         if instrAddrMisaligned then
                           pcN ++# align
+                        else if instrIllegal then
+                          instruction
                         else if instrAccessFault then
-                          pc ++# 0
-                        else if dataAccessFault then
-                          pc ++# 0
-                        else if dataAddrMisaligned then
                           pc ++# 0
                         else if breakpoint then
                           pc ++# 0
-                        else
-                          0
+                        else case dataAddrMisaligned of
+                          Just addr -> addr
+                          _ -> case dataAccessFault of
+                            Just addr -> addr
+                            _ -> 0
                      }
       let pcN1 = zeroExtend (slice d29 d2 (trapBase mtvec))
       return (True,pcN1)
+    else if mret then do
+      #machineState .= machineState { mstatus = mstatus {mie = mpie} }
+      return (False,mepc)
     else do
       return (False,pcN)
 
@@ -459,26 +476,25 @@ loadStoreUnit ::
   MachineWord ->
   -- DBUS
   WishBoneS2M 4 ->
-  (WishBoneM2S 4 30, Maybe MachineWord, Bool, Bool, Bool)
+  (WishBoneM2S 4 30, Maybe MachineWord, Maybe MachineWord, Maybe MachineWord, Bool)
 loadStoreUnit instruction addr store dBusS2M = case opcode of
   LOAD -> let
     lextend ::
       (KnownNat n, n <= 32) =>
+      Sign ->
       BitVector (32 - n) ->
       MachineWord
-    lextend = if unpack (slice d2 d2 func3) then
-                zeroExtend
-              else
-                signExtend
+    lextend Unsigned = zeroExtend
+    lextend Signed = signExtend
 
     loadData = case lsw of
-                 Word -> readData dBusS2M
-                 Half -> lextend (
-                         slice d15 d0 (
-                         readData dBusS2M `shiftR` shiftAmount))
-                 Byte -> lextend (
+                 Byte s -> lextend s (
                          slice d7 d0 (
                          readData dBusS2M `shiftR` shiftAmount))
+                 Half s -> lextend s (
+                         slice d15 d0 (
+                         readData dBusS2M `shiftR` shiftAmount))
+                 _ -> readData dBusS2M
     in
     ( defM2S
         { addr = slice d31 d2 addr
@@ -490,15 +506,15 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
         Nothing
       else
         Just loadData
-    , err dBusS2M
-    , unaligned
+    , if err dBusS2M then Just addr else Nothing
+    , if unaligned then Just addr else Nothing
     , lsFinished
     )
   STORE -> let
     storeData = case lsw of
-                  Word -> store
-                  Half -> store `shiftL` shiftAmount
-                  Byte -> store `shiftL` shiftAmount
+                  Byte _ -> store `shiftL` shiftAmount
+                  Half _ -> store `shiftL` shiftAmount
+                  _ -> store
     in
     ( defM2S
        { addr = slice d31 d2 addr
@@ -509,15 +525,15 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
        , writeEnable = True
        }
     , Nothing
-    , err dBusS2M
-    , unaligned
+    , if err dBusS2M then Just addr else Nothing
+    , if unaligned then Just addr else Nothing
     , lsFinished
     )
   _ ->
     ( defM2S
     , undefined
-    , False
-    , False
+    , Nothing
+    , Nothing
     , True
     )
  where
@@ -525,36 +541,36 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
 
   lsFinished = unaligned || err dBusS2M || acknowledge dBusS2M
 
-  lsw = unpack (slice d1 d0 func3)
+  lsw = unpack func3
 
   alignment = slice d1 d0 addr
 
   unaligned = case lsw of
-    Word -> alignment /= 0
-    Half -> testBit alignment 0
-    Byte -> False
+    Word   -> alignment /= 0
+    Half _ -> testBit alignment 0
+    _ -> False
 
   mask = case lsw of
-    Word -> 0b1111
-    Half -> case alignment of
-              2 -> 0b1100
-              _ -> 0b0011
-    Byte -> case alignment of
+    Byte _ -> case alignment of
               3 -> 0b1000
               2 -> 0b0100
               1 -> 0b0010
               _ -> 0b0001
+    Half _ -> case alignment of
+              2 -> 0b1100
+              _ -> 0b0011
+    _ -> 0b1111
 
   shiftAmount = case lsw of
-    Word -> 0
-    Half -> case alignment of
-              2 -> 16
-              _ -> 0
-    Byte -> case alignment of
+    Byte _ -> case alignment of
               3 -> 24
               2 -> 16
               1 -> 8
               _ -> 0
+    Half _ -> case alignment of
+              2 -> 16
+              _ -> 0
+    _ -> 0
 
 branchUnit ::
   -- instruction
@@ -565,9 +581,8 @@ branchUnit ::
   MachineWord ->
   -- PC
   PC ->
-  MachineState ->
-  State CoreState (PC, BitVector 2)
-branchUnit instruction rs1Val rs2Val pc machineState = zoom #machineState case opcode of
+  (PC, BitVector 2)
+branchUnit instruction rs1Val rs2Val pc = case opcode of
   BRANCH ->
     let taken = case unpack func3 of
                   BEQ -> rs1Val == rs2Val
@@ -579,29 +594,20 @@ branchUnit instruction rs1Val rs2Val pc machineState = zoom #machineState case o
                   _ -> False
      in if taken then
           let (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
-           in return (pc + offset,align)
+           in (pc + offset,align)
         else
-          return (pc + 1, 0)
+          (pc + 1, 0)
 
   JAL ->
     let (offset,align) = split (signExtend imm20J `shiftL` 1 :: MachineWord)
-     in return (pc + offset, align)
+     in (pc + offset, align)
 
   JALR ->
     let (pcN, align) = split (rs1Val + signExtend imm12I)
         alignLSBZero = align .&. 0b10
-     in return (pcN, alignLSBZero)
-
-  SYSTEM -- MRET
-    | func3  == 0
-    , imm12I == 0b0011000_00010
-    -> do
-      let MachineState{mstatus=MStatus{mpie},mepc} = machineState
-      #mstatus .= MStatus {mie=mpie,mpie=True}
-      return (mepc, 0)
-
+     in (pcN, alignLSBZero)
   _ ->
-    return (pc + 1, 0)
+    (pc + 1, 0)
  where
   DecodedInstruction {opcode,func3,imm12B,imm12I,imm20J} = decodeInstruction instruction
 
@@ -737,6 +743,7 @@ data DecodedInstruction
   , imm12S :: BitVector 12
   , imm12B :: BitVector 12
   , func3  :: BitVector 3
+  , legal  :: Bool
   }
 
 decodeInstruction ::
@@ -744,7 +751,7 @@ decodeInstruction ::
   DecodedInstruction
 decodeInstruction w
   = DecodedInstruction
-  { opcode = unpack (slice d6 d0 w)
+  { opcode = opcode
   , rd     = unpack (slice d11 d7 w)
   , rs1    = unpack (slice d19 d15 w)
   , rs2    = unpack (slice d24 d20 w)
@@ -766,8 +773,64 @@ decodeInstruction w
              slice  d7  d7 w ++#
              slice d30 d25 w ++#
              slice d11  d8 w
-  , func3  = slice d14 d12 w
+  , func3  = func3
+  , legal  = case opcode of
+      LUI -> True
+      AUIPC -> True
+      JAL -> True
+      JALR -> func3 == 0
+      BRANCH -> case unpack func3 of
+        BEQ -> True
+        BNE -> True
+        BLT -> True
+        BGE -> True
+        BLTU -> True
+        BGEU -> True
+        _ -> False
+      LOAD -> case unpack func3 of
+        Byte _ -> True
+        Half _ -> True
+        Word -> True
+        _ -> False
+      STORE -> case unpack func3 of
+        Byte Unsigned -> True
+        Half Unsigned -> True
+        Word -> True
+        _ -> False
+      OP_IMM -> case unpack func3 of
+        SR -> func7 == 0 ||        -- SRL
+              func7 == 0b010_0000  -- SRA
+        _ -> True
+      OP -> case unpack func3 of
+        ADD -> func7 == 0 ||        -- ADD
+               func7 == 0b010_0000  -- SUB
+        SLL -> func7 == 0
+        SLT -> func7 == 0
+        SLTU -> func7 == 0
+        XOR -> func7 == 0
+        SR -> func7 == 0 ||        -- SRL
+              func7 == 0b010_0000  -- SRA
+        OR -> func7 == 0
+        AND -> func7 == 0
+      MISC_MEM -> func3 == 1
+      SYSTEM -> case func3 of
+        0 -> func12 == 0 ||  -- ECALL
+             func12 == 1 ||  -- EBREAK
+             func12 == 0b0011000_00010 -- MRET
+        _ -> case unpack (slice d1 d0 func3) of
+          ReadWrite -> True
+          ReadSet -> True
+          ReadClear -> True
+          _ -> False
+      _ -> False
   }
+ where
+  opcode = unpack (slice d6 d0 w)
+  func3 = slice d14 d12 w
+  func7 = slice d31 d25 w
+  func12 = slice d31 d20 w
+
+
 {-# INLINE decodeInstruction #-}
 
 boolToMachineWord :: Bool -> MachineWord

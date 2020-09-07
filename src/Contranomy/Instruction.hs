@@ -34,7 +34,12 @@ module Contranomy.Instruction
       , MACHINE_TIMER_INTERRUPT
       , MACHINE_EXTERNAL_INTERRUPT
       )
-  , LoadStoreWidth (..)
+  , LoadStoreWidth
+      ( Byte
+      , Half
+      , Word
+      )
+  , Sign (..)
   , BranchCondition
       ( BEQ
       , BNE
@@ -226,12 +231,25 @@ data MOp
 deriveDefaultAnnotation [t|MOp|]
 deriveBitPack  [t|MOp|]
 
-data LoadStoreWidth
-  = Byte
-  | Half
-  | Word
+data Sign
+  = Signed
+  | Unsigned
+deriveDefaultAnnotation [t|Sign|]
+deriveBitPack [t|Sign|]
 
-deriveDefaultAnnotation [t|LoadStoreWidth|]
+data LoadStoreWidth
+  = Byte Sign
+  | Half Sign
+  | Word
+  | LSWIllegal
+{-# ANN module (DataReprAnn
+                  $(liftQ [t|LoadStoreWidth|])
+                  3
+                  [ ConstrRepr 'Byte         (1 `downto` 0) 0b000 [0b100]
+                  , ConstrRepr 'Half         (1 `downto` 0) 0b001 [0b100]
+                  , ConstrRepr 'Word         (2 `downto` 0) 0b010 []
+                  , ConstrRepr 'LSWIllegal   0              0     []
+                  ]) #-}
 deriveBitPack  [t|LoadStoreWidth|]
 
 data BranchCondition

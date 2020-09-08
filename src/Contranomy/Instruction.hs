@@ -144,7 +144,7 @@ data MCause
   { interrupt :: Bool
   , code :: BitVector 4
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, ShowX)
 
 deriveAutoReg ''MCause
 

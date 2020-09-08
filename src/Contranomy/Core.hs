@@ -32,27 +32,29 @@ import Contranomy.Instruction
 import Contranomy.RVFI
 import Contranomy.WishBone
 
+import Debug.Trace
+
 type PC = BitVector 30
 
 data CoreStage
   = InstructionFetch
   | Decode
   | Execute
-  deriving (Generic, NFDataX, AutoReg)
+  deriving (Generic, NFDataX, ShowX, AutoReg)
 
 data MStatus
   = MStatus
   { mie :: Bool
   , mpie :: Bool
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, ShowX)
 
 deriveAutoReg ''MStatus
 
 data InterruptMode
   = Direct {trapBase :: (BitVector 30)}
   | Vectored {trapBase :: (BitVector 30)}
-  deriving (Generic, NFDataX, AutoReg)
+  deriving (Generic, NFDataX, ShowX, AutoReg)
 
 {-# ANN module (DataReprAnn
                   $(liftQ [t|InterruptMode|])
@@ -68,7 +70,7 @@ data Mie
   , mtie :: Bool
   , msie :: Bool
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, ShowX)
 
 deriveAutoReg ''Mie
 
@@ -83,7 +85,7 @@ data MachineState
   , mtval :: MachineWord
   , irqmask :: MachineWord
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, ShowX)
 
 deriveAutoReg ''MachineState
 
@@ -95,7 +97,7 @@ data CoreState
   , machineState :: MachineState
   , rvfiOrder :: Unsigned 64
   }
-  deriving (Generic, NFDataX)
+  deriving (Generic, NFDataX, ShowX)
 
 deriveAutoReg ''CoreState
 
@@ -118,6 +120,9 @@ data CoreOut
   , dBusM2S :: "dBusWishbone" ::: WishBoneM2S 4 30
   }
 
+instance Show CoreOut where
+  show _ = "CoreOut"
+
 defCoreOut :: CoreOut
 defCoreOut = CoreOut { iBusM2S = defM2S, dBusM2S = defM2S }
 
@@ -132,7 +137,7 @@ core = mealyAutoB transition cpuStart
   cpuStart
     = CoreState
     { stage = InstructionFetch
-    , pc = 0
+    , pc = 90
     , instruction = 0
     , machineState = machineStart
     , rvfiOrder = 0
@@ -140,14 +145,14 @@ core = mealyAutoB transition cpuStart
 
   machineStart
     = MachineState
-    { mstatus = MStatus { mie = False, mpie = False }
+    { mstatus = MStatus { mie = True, mpie = False }
     , mcause = MCause { interrupt = False, code = 0 }
-    , mtvec = Direct 0
-    , mie = Mie { meie = False, mtie = False, msie = False }
+    , mtvec = Direct 40
+    , mie = Mie { meie = True, mtie = False, msie = False }
     , mscratch = 0
-    , mepc = 0
+    , mepc = 80
     , mtval = 0
-    , irqmask = 0
+    , irqmask = 1
     }
 
 transition ::
@@ -157,7 +162,7 @@ transition ::
   , CoreState )
 transition
   s@CoreState{stage=InstructionFetch, pc}
-  (CoreIn{iBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},_) = runState' s do
+  (CoreIn{iBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},_) = trace (showX s) $ runState' s do
   #instruction .= readData iBusS2M
 
   let DecodedInstruction {legal} = decodeInstruction (readData iBusS2M)
@@ -188,14 +193,14 @@ transition
                    , strobe = True } }
 
 
-transition s@CoreState{stage=Decode,instruction} _ = runState' s do
+transition s@CoreState{stage=Decode,instruction} _ = trace (showX s) $ runState' s do
   #stage .= Execute
   let DecodedInstruction {rs1,rs2} = decodeInstruction instruction
   return (defCoreOut,(rs1,rs2,Nothing),defRVFI)
 
 
 transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
-  (CoreIn{dBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},(rs1Val,rs2Val)) = runState' s do
+  (CoreIn{dBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},(rs1Val,rs2Val)) = trace (showX s) $ runState' s do
   let DecodedInstruction
         { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S, func3 }
         = decodeInstruction instruction

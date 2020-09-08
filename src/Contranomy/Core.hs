@@ -652,7 +652,8 @@ csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externa
       MSTATUS -> do
         let oldValue = bitB mpie 7 .|. bitB mie 3
             newValue = csrWrite csrType oldValue writeValue1
-        #mstatus .= MStatus {mie=testBit newValue 7,mpie=testBit newValue 3}
+        #mstatus .= MStatus { mpie=testBit newValue 7
+                            , mie=testBit newValue 3 }
         return (Just oldValue, newValue)
       MISA -> do
         let oldValue = bit 30 .|. bit 8

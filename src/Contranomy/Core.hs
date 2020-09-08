@@ -794,8 +794,8 @@ decodeInstruction w
         Word -> True
         _ -> False
       STORE -> case unpack func3 of
-        Byte Unsigned -> True
-        Half Unsigned -> True
+        Byte Signed -> True
+        Half Signed -> True
         Word -> True
         _ -> False
       OP_IMM -> case unpack func3 of

@@ -1,4 +1,6 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Contranomy.Instruction
   ( Opcode
@@ -165,38 +167,21 @@ pattern MACHINE_SOFTWARE_INTERRUPT = MCause True 3
 pattern MACHINE_TIMER_INTERRUPT = MCause True 7
 pattern MACHINE_EXTERNAL_INTERRUPT = MCause True 11
 
-data Opcode
-  = LUI
-  | AUIPC
-  | JAL
-  | JALR
-  | BRANCH
-  | LOAD
-  | STORE
-  | OP_IMM
-  | OP
-  | MISC_MEM
-  | SYSTEM
-  | Illegal -- Not exported
-  deriving (Show)
+newtype Opcode = Opcode (BitVector 7)
+  deriving newtype BitPack
 
-{-# ANN module (DataReprAnn
-                  $(liftQ [t|Opcode|])
-                  7
-                  [ ConstrRepr 'LUI      (6 `downto` 0) 0b0110111 []
-                  , ConstrRepr 'AUIPC    (6 `downto` 0) 0b0010111 []
-                  , ConstrRepr 'JAL      (6 `downto` 0) 0b1101111 []
-                  , ConstrRepr 'JALR     (6 `downto` 0) 0b1100111 []
-                  , ConstrRepr 'BRANCH   (6 `downto` 0) 0b1100011 []
-                  , ConstrRepr 'LOAD     (6 `downto` 0) 0b0000011 []
-                  , ConstrRepr 'STORE    (6 `downto` 0) 0b0100011 []
-                  , ConstrRepr 'OP_IMM   (6 `downto` 0) 0b0010011 []
-                  , ConstrRepr 'OP       (6 `downto` 0) 0b0110011 []
-                  , ConstrRepr 'MISC_MEM (6 `downto` 0) 0b0001111 []
-                  , ConstrRepr 'SYSTEM   (6 `downto` 0) 0b1110011 []
-                  , ConstrRepr 'Illegal  0              0         []
-                  ]) #-}
-deriveBitPack [t| Opcode |]
+pattern LUI,AUIPC,JAL,JALR,BRANCH,LOAD,STORE,OP_IMM,OP,MISC_MEM,SYSTEM :: Opcode
+pattern LUI = Opcode 0b0110111
+pattern AUIPC = Opcode 0b0010111
+pattern JAL = Opcode 0b1101111
+pattern JALR = Opcode 0b1100111
+pattern BRANCH = Opcode 0b1100011
+pattern LOAD = Opcode 0b0000011
+pattern STORE = Opcode 0b0100011
+pattern OP_IMM = Opcode 0b0010011
+pattern OP = Opcode 0b0110011
+pattern MISC_MEM = Opcode 0b0001111
+pattern SYSTEM = Opcode 0b1110011
 
 data ShiftRight
   = Logical
@@ -241,14 +226,18 @@ data LoadStoreWidth
   = Byte Sign
   | Half Sign
   | Word
-  | LSWIllegal
+  | LSWIllegal1
+  | LSWIllegal2
+  | LSWIllegal3
 {-# ANN module (DataReprAnn
                   $(liftQ [t|LoadStoreWidth|])
                   3
-                  [ ConstrRepr 'Byte         (1 `downto` 0) 0b000 [0b100]
-                  , ConstrRepr 'Half         (1 `downto` 0) 0b001 [0b100]
-                  , ConstrRepr 'Word         (2 `downto` 0) 0b010 []
-                  , ConstrRepr 'LSWIllegal   0              0     []
+                  [ ConstrRepr 'Byte         (1 `downto` 0)  0b00 [0b100]  -- 0b000:0 0b100:4
+                  , ConstrRepr 'Half         (1 `downto` 0)  0b01 [0b100]  -- 0b001:1 0b101:5
+                  , ConstrRepr 'Word         (2 `downto` 0) 0b010 []       -- 0b010:2
+                  , ConstrRepr 'LSWIllegal1  (2 `downto` 0) 0b011 []
+                  , ConstrRepr 'LSWIllegal2  (2 `downto` 0) 0b110 []
+                  , ConstrRepr 'LSWIllegal3  (2 `downto` 0) 0b111 []
                   ]) #-}
 deriveBitPack  [t|LoadStoreWidth|]
 
@@ -259,17 +248,19 @@ data BranchCondition
   | BGE
   | BLTU
   | BGEU
-  | BIllegal
+  | BIllegal1
+  | BIllegal2
 {-# ANN module (DataReprAnn
                   $(liftQ [t|BranchCondition|])
                   3
-                  [ ConstrRepr 'BEQ      (2 `downto` 0) 0b000 []
-                  , ConstrRepr 'BNE      (2 `downto` 0) 0b001 []
-                  , ConstrRepr 'BLT      (2 `downto` 0) 0b100 []
-                  , ConstrRepr 'BGE      (2 `downto` 0) 0b101 []
-                  , ConstrRepr 'BLTU     (2 `downto` 0) 0b110 []
-                  , ConstrRepr 'BGEU     (2 `downto` 0) 0b111 []
-                  , ConstrRepr 'BIllegal 0              0     []
+                  [ ConstrRepr 'BEQ       (2 `downto` 0) 0b000 []
+                  , ConstrRepr 'BNE       (2 `downto` 0) 0b001 []
+                  , ConstrRepr 'BLT       (2 `downto` 0) 0b100 []
+                  , ConstrRepr 'BGE       (2 `downto` 0) 0b101 []
+                  , ConstrRepr 'BLTU      (2 `downto` 0) 0b110 []
+                  , ConstrRepr 'BGEU      (2 `downto` 0) 0b111 []
+                  , ConstrRepr 'BIllegal1 (2 `downto` 0) 0b010 []
+                  , ConstrRepr 'BIllegal2 (2 `downto` 0) 0b011 []
                   ]) #-}
 deriveBitPack [t| BranchCondition |]
 
@@ -316,6 +307,6 @@ data CSRType
                   [ ConstrRepr 'ReadWrite  (1 `downto` 0) 0b01 []
                   , ConstrRepr 'ReadSet    (1 `downto` 0) 0b10 []
                   , ConstrRepr 'ReadClear  (1 `downto` 0) 0b11 []
-                  , ConstrRepr 'CSRIllegal 0              0    []
+                  , ConstrRepr 'CSRIllegal (1 `downto` 0) 0b00 []
                   ]) #-}
 deriveBitPack [t| CSRType |]

@@ -137,7 +137,7 @@ core = mealyAutoB transition cpuStart
   cpuStart
     = CoreState
     { stage = InstructionFetch
-    , pc = 90
+    , pc = 0
     , instruction = 0
     , machineState = machineStart
     , rvfiOrder = 0
@@ -145,14 +145,14 @@ core = mealyAutoB transition cpuStart
 
   machineStart
     = MachineState
-    { mstatus = MStatus { mie = True, mpie = False }
+    { mstatus = MStatus { mie = False, mpie = False }
     , mcause = MCause { interrupt = False, code = 0 }
-    , mtvec = Direct 40
-    , mie = Mie { meie = True, mtie = False, msie = False }
+    , mtvec = Direct 0
+    , mie = Mie { meie = False, mtie = False, msie = False }
     , mscratch = 0
-    , mepc = 80
+    , mepc = 0
     , mtval = 0
-    , irqmask = 1
+    , irqmask = 0
     }
 
 transition ::
@@ -657,7 +657,9 @@ csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externa
       MSTATUS -> do
         let oldValue = bitB mpie 7 .|. bitB mie 3
             newValue = csrWrite csrType oldValue writeValue1
-        #mstatus .= MStatus {mie=testBit newValue 7,mpie=testBit newValue 3}
+        #mstatus .= MStatus {mpie=testBit newValue 7,mie=testBit newValue 3}
+        -- xx <- use #mstatus
+        -- _ <- error (showX (oldValue,newValue,xx))
         return (Just oldValue, newValue)
       MISA -> do
         let oldValue = bit 30 .|. bit 8

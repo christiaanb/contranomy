@@ -1,11 +1,4 @@
-resolver: lts-15.10
-
-extra-deps:
-- concurrent-supply-0.1.8
-- ghc-typelits-extra-0.4
-- clash-prelude-1.2.2
-- clash-lib-1.2.2
-- clash-ghc-1.2.2
+resolver: nightly-2020-09-07
 
 flags:
   clash-prelude:

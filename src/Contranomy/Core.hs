@@ -36,8 +36,8 @@ type PC = BitVector 30
 
 data CoreStage
   = InstructionFetch
-  | Decode
-  | Execute
+  | Decode { accessFault :: Bool }
+  | Execute { accessFault :: Bool }
   deriving (Generic, NFDataX, AutoReg)
 
 data MStatus
@@ -156,29 +156,16 @@ transition ::
   ( (CoreOut, (Register, Register, Maybe (Register, MachineWord)), RVFI)
   , CoreState )
 transition
-  s@CoreState{stage=InstructionFetch, pc}
-  (CoreIn{iBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},_) = runState' s do
+  s@CoreState{stage=InstructionFetch, pc} (CoreIn{iBusS2M},_) = runState' s do
+
   #instruction .= readData iBusS2M
 
-  let DecodedInstruction {legal} = decodeInstruction (readData iBusS2M)
-
-  let exceptionIn = defExceptionIn
-                      { instrAccessFault  = err iBusS2M
-                      , instrIllegal      = acknowledge iBusS2M && not legal
-                      , softwareInterrupt = softwareInterrupt
-                      , timerInterrupt    = timerInterrupt
-                      , externalInterrupt = externalInterrupt
-                      }
-  (trap,pcN) <- handleExceptions s exceptionIn (pc,0)
-
-  #stage .= if trap then
-              InstructionFetch
+  #stage .= if err iBusS2M then
+              Decode {accessFault = True}
             else if acknowledge iBusS2M then
-              Decode
+              Decode {accessFault = False}
             else
               InstructionFetch
-
-  #pc .= pcN
 
   return . (,(undefined,undefined,Nothing),defRVFI) $ defCoreOut
          { iBusM2S = defM2S
@@ -188,16 +175,16 @@ transition
                    , strobe = True } }
 
 
-transition s@CoreState{stage=Decode,instruction} _ = runState' s do
-  #stage .= Execute
+transition s@CoreState{stage=Decode accessFault,instruction} _ = runState' s do
+  #stage .= Execute accessFault
   let DecodedInstruction {rs1,rs2} = decodeInstruction instruction
   return (defCoreOut,(rs1,rs2,Nothing),defRVFI)
 
 
-transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
+transition s@CoreState{stage=Execute accessFault,instruction,pc,machineState,rvfiOrder}
   (CoreIn{dBusS2M,softwareInterrupt,timerInterrupt,externalInterrupt},(rs1Val,rs2Val)) = runState' s do
   let DecodedInstruction
-        { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S, func3 }
+        { opcode, rd, rs1, rs2, iop, srla, isSub, imm12I, imm20U, imm12S, func3, legal }
         = decodeInstruction instruction
 
       aluArg1 = case opcode of
@@ -241,19 +228,10 @@ transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
 
   let pcN = branchUnit instruction rs1Val rs2Val pc
 
-  csrVal@(csrOld,_) <-
-    csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
-
-  let rdVal = case opcode of
-        BRANCH   -> Nothing
-        MISC_MEM -> Nothing
-        SYSTEM   -> csrOld
-        STORE    -> Nothing
-        LOAD     -> ldVal
-        _        -> Just aluIResult
-
-  let exceptionIn = defExceptionIn
-                      { instrAddrMisaligned = snd pcN /= 0
+  let exceptionIn = ExceptionIn
+                      { instrAccessFault = accessFault
+                      , instrAddrMisaligned = snd pcN /= 0
+                      , instrIllegal = not legal
                       , dataAccessFault = dataAccessFault
                       , dataAddrMisaligned = dataAddrMisaligned
                       , breakpoint = case opcode of
@@ -265,12 +243,26 @@ transition s@CoreState{stage=Execute,instruction,pc,machineState,rvfiOrder}
                       , mret = case opcode of
                           SYSTEM | func3 == 0 -> imm12I == 0b0011000_00010
                           _ -> False
+                      , timerInterrupt = timerInterrupt
+                      , softwareInterrupt = softwareInterrupt
+                      , externalInterrupt = externalInterrupt
                       }
   (trap,pcN1) <- handleExceptions s exceptionIn pcN
 
+  csrVal@(csrOld,_) <-
+    csrUnit trap instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
+
+  let rdVal = case opcode of
+        BRANCH   -> Nothing
+        MISC_MEM -> Nothing
+        SYSTEM   -> csrOld
+        STORE    -> Nothing
+        LOAD     -> ldVal
+        _        -> Just aluIResult
+
   let registerWrite = if trap || rd == X0 then Nothing else (rd,) <$> rdVal
 
-  when lsFinished do
+  when (trap || lsFinished) do
     #pc .= pcN1
     #rvfiOrder += 1
     #stage .= InstructionFetch
@@ -365,22 +357,6 @@ data ExceptionIn
   , timerInterrupt      :: Bool
   , softwareInterrupt   :: Bool
   , externalInterrupt   :: BitVector 32
-  }
-
-defExceptionIn :: ExceptionIn
-defExceptionIn
-  = ExceptionIn
-  { instrAccessFault    = False
-  , instrAddrMisaligned = False
-  , instrIllegal        = False
-  , dataAccessFault     = Nothing
-  , dataAddrMisaligned  = Nothing
-  , breakpoint          = False
-  , eCall               = False
-  , mret                = False
-  , timerInterrupt      = False
-  , softwareInterrupt   = False
-  , externalInterrupt   = 0
   }
 
 handleExceptions ::
@@ -613,6 +589,7 @@ branchUnit instruction rs1Val rs2Val pc = case opcode of
 
 
 csrUnit ::
+  Bool ->
   BitVector 32 ->
   MachineWord ->
   MachineState ->
@@ -620,9 +597,10 @@ csrUnit ::
   Bool ->
   MachineWord ->
   State CoreState (Maybe MachineWord, MachineWord)
-csrUnit instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
+csrUnit trap instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
   | SYSTEM <- opcode
   , func3 /= 0
+  , not trap
   = zoom #machineState do
     let MachineState
           {mstatus=MStatus{mie,mpie}

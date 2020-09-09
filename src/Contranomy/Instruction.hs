@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -59,6 +60,12 @@ module Contranomy.Instruction
       ( ReadWrite
       , ReadSet
       , ReadClear
+      )
+  , System12
+      ( ECALL
+      , EBREAK
+      , MRET
+      , ..
       )
   )
 where
@@ -310,3 +317,11 @@ data CSRType
                   , ConstrRepr 'CSRIllegal (1 `downto` 0) 0b00 []
                   ]) #-}
 deriveBitPack [t| CSRType |]
+
+newtype System12 = System12 (BitVector 12)
+  deriving newtype Eq
+
+pattern ECALL, EBREAK, MRET :: System12
+pattern ECALL = System12 0
+pattern EBREAK = System12 1
+pattern MRET = System12 0b0011000_00010

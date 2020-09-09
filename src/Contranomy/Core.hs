@@ -459,7 +459,7 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
                             Just addr -> addr
                             _ -> 0
                      }
-      let pcN1 = zeroExtend (slice d29 d2 (trapBase mtvec))
+      let pcN1 = trapBase mtvec
       return (True,pcN1)
     else if mret then do
       #machineState .= machineState { mstatus = mstatus {mie = mpie} }

@@ -36,7 +36,6 @@ type PC = BitVector 30
 
 data CoreStage
   = InstructionFetch
-  | Decode { accessFault :: Bool }
   | Execute { accessFault :: Bool }
   deriving (Generic, NFDataX, AutoReg)
 
@@ -159,26 +158,21 @@ transition
   s@CoreState{stage=InstructionFetch, pc} (CoreIn{iBusS2M},_) = runState' s do
 
   #instruction .= readData iBusS2M
+  let DecodedInstruction {rs1,rs2} = decodeInstruction (readData iBusS2M)
 
   #stage .= if err iBusS2M then
-              Decode {accessFault = True}
+              Execute {accessFault = True}
             else if acknowledge iBusS2M then
-              Decode {accessFault = False}
+              Execute {accessFault = False}
             else
               InstructionFetch
 
-  return . (,(undefined,undefined,Nothing),defRVFI) $ defCoreOut
+  return . (,(rs1,rs2,Nothing),defRVFI) $ defCoreOut
          { iBusM2S = defM2S
                    { addr   = pc
                    , select = 0b1111
                    , cycle  = True
                    , strobe = True } }
-
-
-transition s@CoreState{stage=Decode accessFault,instruction} _ = runState' s do
-  #stage .= Execute accessFault
-  let DecodedInstruction {rs1,rs2} = decodeInstruction instruction
-  return (defCoreOut,(rs1,rs2,Nothing),defRVFI)
 
 
 transition s@CoreState{stage=Execute accessFault,instruction,pc,machineState,rvfiOrder}

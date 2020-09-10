@@ -217,8 +217,10 @@ transition s@CoreState{stage=Execute accessFault,instruction,pc,machineState,rvf
         OR   -> aluArg1 .|. aluArg2
         AND  -> aluArg1 .&. aluArg2
 
+      instructionFault = accessFault || not legal
+
       (dBusM2S,ldVal,dataAccessFault,dataAddrMisaligned,lsFinished) =
-        loadStoreUnit instruction aluIResult rs2Val dBusS2M
+        loadStoreUnit instruction instructionFault aluIResult rs2Val dBusS2M
 
   let pcN = branchUnit instruction rs1Val rs2Val pc
 
@@ -232,7 +234,7 @@ transition s@CoreState{stage=Execute accessFault,instruction,pc,machineState,rvf
                       , softwareInterrupt = softwareInterrupt
                       , externalInterrupt = externalInterrupt
                       }
-  (trap,pcN1) <- handleExceptions s exceptionIn pcN
+  (trap,pcN1) <- handleExceptions s exceptionIn lsFinished pcN
 
   csrVal@(csrOld,_) <-
     csrUnit trap instruction rs1Val machineState softwareInterrupt timerInterrupt externalInterrupt
@@ -247,7 +249,7 @@ transition s@CoreState{stage=Execute accessFault,instruction,pc,machineState,rvf
 
   let registerWrite = if trap || rd == X0 then Nothing else (rd,) <$> rdVal
 
-  when (trap || lsFinished) do
+  when lsFinished do
     #pc .= pcN1
     #rvfiOrder += 1
     #stage .= InstructionFetch
@@ -344,10 +346,12 @@ data ExceptionIn
 handleExceptions ::
   CoreState ->
   ExceptionIn ->
+  -- Load/Store unit finished
+  Bool ->
   -- Next PC
   (PC,BitVector 2) ->
   State CoreState (Bool,PC)
-handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) = do
+handleExceptions CoreState{pc,instruction,machineState} exceptionIn lsFinished (pcN,align) = do
   let ExceptionIn
         { instrAccessFault
         , instrAddrMisaligned
@@ -388,7 +392,8 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
       timerInterrupt1    = timerInterrupt && mtie
       softwareInterrupt1 = softwareInterrupt && msie
       externalInterrupt1 = ((externalInterrupt .&. irqmask) /= 0) && meie
-  let interrupt = mie && (timerInterrupt1 || softwareInterrupt1 || externalInterrupt1)
+  let interrupt =
+        lsFinished && mie && (timerInterrupt1 || softwareInterrupt1 || externalInterrupt1)
 
 
   if trap || interrupt then do
@@ -447,6 +452,8 @@ handleExceptions CoreState{pc,instruction,machineState} exceptionIn (pcN,align) 
 loadStoreUnit ::
   -- Instruction
   BitVector 32 ->
+  -- Instruction faulty
+  Bool ->
   -- address
   MachineWord ->
   -- store
@@ -454,8 +461,8 @@ loadStoreUnit ::
   -- DBUS
   WishBoneS2M 4 ->
   (WishBoneM2S 4 30, Maybe MachineWord, Maybe MachineWord, Maybe MachineWord, Bool)
-loadStoreUnit instruction addr store dBusS2M = case opcode of
-  LOAD -> let
+loadStoreUnit instruction instructionFault addr store dBusS2M = case opcode of
+  LOAD | not instructionFault -> let
     lextend ::
       (KnownNat n, n <= 32) =>
       Sign ->
@@ -476,18 +483,18 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
     ( defM2S
         { addr = slice d31 d2 addr
         , select = mask
-        , cycle = True
-        , strobe = True
+        , cycle = aligned
+        , strobe = aligned
         }
-    , if unaligned || err dBusS2M || not (acknowledge dBusS2M) then
+    , if not aligned || err dBusS2M || not (acknowledge dBusS2M) then
         Nothing
       else
         Just loadData
     , if err dBusS2M then Just addr else Nothing
-    , if unaligned then Just addr else Nothing
+    , if aligned then Nothing else Just addr
     , lsFinished
     )
-  STORE -> let
+  STORE | not instructionFault -> let
     storeData = case lsw of
                   Byte _ -> store `shiftL` shiftAmount
                   Half _ -> store `shiftL` shiftAmount
@@ -497,18 +504,18 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
        { addr = slice d31 d2 addr
        , writeData = storeData
        , select = mask
-       , cycle = True
-       , strobe = True
-       , writeEnable = True
+       , cycle = aligned
+       , strobe = aligned
+       , writeEnable = aligned
        }
     , Nothing
     , if err dBusS2M then Just addr else Nothing
-    , if unaligned then Just addr else Nothing
+    , if aligned then Nothing else Just addr
     , lsFinished
     )
   _ ->
     ( defM2S
-    , undefined
+    , Nothing
     , Nothing
     , Nothing
     , True
@@ -516,16 +523,16 @@ loadStoreUnit instruction addr store dBusS2M = case opcode of
  where
   DecodedInstruction {opcode,func3} = decodeInstruction instruction
 
-  lsFinished = unaligned || err dBusS2M || acknowledge dBusS2M
+  lsFinished = err dBusS2M || acknowledge dBusS2M
 
   lsw = unpack func3
 
   alignment = slice d1 d0 addr
 
-  unaligned = case lsw of
-    Word   -> alignment /= 0
-    Half _ -> testBit alignment 0
-    _ -> False
+  aligned = case lsw of
+    Word   -> alignment == 0
+    Half _ -> not (testBit alignment 0)
+    _ -> True
 
   mask = case lsw of
     Byte _ -> case alignment of

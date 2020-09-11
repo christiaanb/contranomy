@@ -127,11 +127,6 @@ Notes in table:
 5. TODO
 6. Cabal offers snapshots through "freeze files". Freeze files pin all (transitive) dependencies of a project to a specific version. In contrast, Stack and Nix offer snapshots of versions of Haskell packages known to work together. In other words, when using Cabal the burden of figuring out which dependency works with which is on the user.
 
-# Change the LICENSE
-This Clash Example Project is dedicated to the public domain by its authors.
-It is likely that you might _not_ want to do the same when using this Clash Example Project as a template for your projects.
-So before publishing your work, make sure to change the copyright and license statement in the LICENSE file.
-
 # IDE support
 We currently recommend Visual Studio Code in combination with `ghcide`. To use it, execute the following steps:
 

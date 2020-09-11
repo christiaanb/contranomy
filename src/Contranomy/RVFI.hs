@@ -1,3 +1,8 @@
+{-|
+Copyright  :  (C) 2020, Christiaan Baaij
+License    :  BSD2 (see the file LICENSE)
+Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
+-}
 module Contranomy.RVFI where
 
 import Clash.Prelude
@@ -40,8 +45,8 @@ data RVFICSR
   }
   deriving Show
 
-defRVFI :: RVFI
-defRVFI
+rvfi :: RVFI
+rvfi
   = RVFI
   { valid    = False
   , order    = 0
@@ -64,11 +69,11 @@ defRVFI
   , memWMask = 0
   , memRData = 0
   , memWData = 0
-  , misaCSR  = defRVFICSR
+  , misaCSR  = rvfiCSR
   }
 
-defRVFICSR :: RVFICSR
-defRVFICSR
+rvfiCSR :: RVFICSR
+rvfiCSR
   = RVFICSR
   { rmask = 0
   , wmask = 0

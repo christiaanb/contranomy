@@ -75,14 +75,23 @@ library
   exposed-modules:
     Contranomy
     Contranomy.Clash.Extra
+
     Contranomy.Core
-    Contranomy.Decode
-    Contranomy.Encode
+    Contranomy.Core.ALU
+    Contranomy.Core.Branch
+    Contranomy.Core.CoreState
+    Contranomy.Core.CSR
+    Contranomy.Core.Decode
+    Contranomy.Core.Exception
+    Contranomy.Core.MachineState
+    Contranomy.Core.LoadStore
+    Contranomy.Core.RVFI
+    Contranomy.Core.SharedTypes
+
     Contranomy.Instruction
     Contranomy.RegisterFile
-    Contranomy.RV32IM
     Contranomy.RVFI
-    Contranomy.WishBone
+    Contranomy.Wishbone
   default-language: Haskell2010
   build-depends:
       transformers,

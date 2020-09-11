@@ -22,9 +22,9 @@ contranomy ::
   ( "" ::: Signal Core CoreIn) ->
   ( "" ::: Signal Core CoreOut)
 contranomy clk rst coreIn = withClockResetEnable clk rst enableGen $
-  let (coreOut,regWrite,_) = core (coreIn,regOut)
+  let (coreResult,regWrite,_) = core (coreIn,regOut)
       regOut = registerFile regWrite
-   in coreOut
+   in coreResult
 
 makeTopEntity 'contranomy
 
@@ -35,8 +35,8 @@ contranomyRVFI ::
   ( "" ::: Signal Core CoreOut
   , "" ::: Signal Core RVFI)
 contranomyRVFI clk rst coreIn = withClockResetEnable clk rst enableGen $
-  let (coreOut,regWrite,rvfi) = core (coreIn,regOut)
+  let (coreResult,regWrite,rvfiOut) = core (coreIn,regOut)
       regOut = registerFile regWrite
-   in (coreOut,rvfi)
+   in (coreResult,rvfiOut)
 
 makeTopEntity 'contranomyRVFI

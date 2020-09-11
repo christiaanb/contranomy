@@ -6,20 +6,20 @@ Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
 
 {-# LANGUAGE PatternSynonyms #-}
 
-module Contranomy.WishBone where
+module Contranomy.Wishbone where
 
-import Clash.Prelude hiding (cycle, select)
+import Clash.Prelude
 
-data WishBoneM2S bytes addressWidth
-  = WishBoneM2S
+data WishboneM2S bytes addressWidth
+  = WishboneM2S
   { -- | ADR
     addr :: "ADR" ::: BitVector addressWidth
     -- | DAT
   , writeData :: "DAT_MOSI" ::: BitVector (8 * bytes)
     -- | SEL
-  , select :: "SEL" ::: BitVector bytes
+  , busSelect :: "SEL" ::: BitVector bytes
     -- | CYC
-  , cycle :: "CYC" ::: Bool
+  , busCycle :: "CYC" ::: Bool
     -- | STB
   , strobe :: "STB" ::: Bool
     -- | WE
@@ -30,8 +30,8 @@ data WishBoneM2S bytes addressWidth
   , burstTypeExtension :: "BTE" ::: BurstTypeExtension
   }
 
-data WishBoneS2M bytes
-  = WishBoneS2M
+data WishboneS2M bytes
+  = WishboneS2M
   { -- | DAT
     readData :: "DAT_MISO" ::: BitVector (8 * bytes)
     -- | ACK
@@ -48,35 +48,33 @@ pattern ConstantAddressBurst = CycleTypeIdentifier 1
 pattern IncrementingBurst = CycleTypeIdentifier 2
 pattern EndOfBurst = CycleTypeIdentifier 7
 
-newtype BurstTypeExtension = BurstTypeExtension (BitVector 2)
+data BurstTypeExtension
+  = LinearBurst
+  | Beat4Burst
+  | Beat8Burst
+  | Beat16Burst
 
-pattern LinearBurst, Beat4Burst, Beat8Burst, Beat16Burst :: BurstTypeExtension
-pattern LinearBurst = BurstTypeExtension 0
-pattern Beat4Burst = BurstTypeExtension 1
-pattern Beat8Burst = BurstTypeExtension 2
-pattern Beat16Burst = BurstTypeExtension 3
-
-defM2S ::
+wishboneM2S ::
   forall bytes addressWidth .
-  WishBoneM2S bytes addressWidth
-defM2S
-  = WishBoneM2S
+  WishboneM2S bytes addressWidth
+wishboneM2S
+  = WishboneM2S
   { addr = undefined
   , writeData = undefined
-  , select = undefined
-  , cycle = False
+  , busSelect = undefined
+  , busCycle = False
   , strobe = False
   , writeEnable = False
   , cycleTypeIdentifier = Classic
   , burstTypeExtension = LinearBurst
   }
 
-defS2M ::
+wishboneS2M ::
   forall bytes .
   KnownNat bytes =>
-  WishBoneS2M bytes
-defS2M
-  = WishBoneS2M
+  WishboneS2M bytes
+wishboneS2M
+  = WishboneS2M
   { readData = 0
   , acknowledge = False
   , err = False

@@ -20,7 +20,6 @@ module Contranomy.Instruction
   , ShiftRight (..)
   , IOp (..)
   , MOp (..)
-  , MachineWord
   , Register (..)
   , MCause
       ( ..
@@ -77,8 +76,6 @@ import Clash.Annotations.BitRepresentation.Deriving
 import Clash.Prelude
 
 import Contranomy.Clash.Extra
-
-type MachineWord = BitVector 32
 
 -- | Register 1-31 are general-purpose registers holding integer
 -- values.
@@ -154,7 +151,6 @@ data MCause
   , code :: BitVector 4
   }
   deriving (Generic, NFDataX)
-
 deriveAutoReg ''MCause
 
 pattern INSTRUCTION_ADDRESS_MISALIGNED, INSTRUCTION_ACCESS_FAULT, ILLEGAL_INSTRUCTION,
@@ -193,7 +189,6 @@ pattern SYSTEM = Opcode 0b1110011
 data ShiftRight
   = Logical
   | Arithmetic
-
 deriveDefaultAnnotation [t|ShiftRight|]
 deriveBitPack  [t|ShiftRight|]
 
@@ -206,7 +201,6 @@ data IOp
   | SR   -- 5
   | OR   -- 6
   | AND  -- 7
-
 deriveDefaultAnnotation [t|IOp|]
 deriveBitPack  [t|IOp|]
 
@@ -219,7 +213,6 @@ data MOp
   | DIVU    -- 5
   | REM     -- 6
   | REMU    -- 7
-
 deriveDefaultAnnotation [t|MOp|]
 deriveBitPack  [t|MOp|]
 

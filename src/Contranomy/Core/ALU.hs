@@ -15,7 +15,41 @@ import Contranomy.Core.Decode
 import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 
-alu :: MachineWord -> PC -> MachineWord -> MachineWord -> MachineWord
+-- | The ALU implements the following instructions, or at least parts of them
+--
+-- * LUI
+-- * AUIPC
+--
+-- * ADD/SUB/ADDI
+-- * SLL/SLLI
+-- * SLT/SLTI
+-- * SLTU/SLTUI
+-- * XOR/XORI
+-- * SRL/SRLI
+-- * SRA/SRAI
+-- * OR/ORI
+-- * AND/ANDI
+--
+-- It is additionally used to calculate the PC after the PC of the current instruction for:
+--
+-- * JAL
+-- * JALR
+--
+-- And it performs the address calculation for the Load and Store instructions
+--
+-- * LOAD
+-- * STORE
+alu ::
+  -- | Instruction
+  MachineWord ->
+  -- | Program counter
+  PC ->
+  -- | Value of RS1
+  MachineWord ->
+  -- | Value of RS2
+  MachineWord ->
+  -- | Result
+  MachineWord
 alu instruction pc rs1Value rs2Value = aluResult
  where
   DecodedInstruction
@@ -41,10 +75,10 @@ alu instruction pc rs1Value rs2Value = aluResult
 
   aluArg2Shamt = unpack (zeroExtend (slice d4 d0 aluArg2))
 
-  aluOp   = case opcode of
-              OP     -> iop
-              OP_IMM -> iop
-              _      -> ADD
+  aluOp = case opcode of
+            OP     -> iop
+            OP_IMM -> iop
+            _      -> ADD
 
   aluResult = case aluOp of
     ADD  -> aluArg1 + aluArg2

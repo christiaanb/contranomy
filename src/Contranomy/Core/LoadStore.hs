@@ -15,19 +15,29 @@ import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 import Contranomy.Wishbone
 
+-- | This function performs data-bus transactions for loads and stores.
+--
+-- It does not initiate the transaction if the address is misaligned for the
+-- given load/store size, nor does it perform bus transactions for faulty
+-- instructions (not even loads, they might have side-effects).
 loadStoreUnit ::
-  -- Instruction
+  -- | Instruction
   MachineWord ->
-  -- Instruction faulty
+  -- | Instruction faulty, no data bus transactions should happen for faulty instrucctions
   Bool ->
-  -- address
+  -- | Load/Store address (calculated by the ALU)
   MachineWord ->
-  -- store
+  -- | The value to store
   MachineWord ->
-  -- DBUS
+  -- | Data bus response (slave-to-master)
   WishboneS2M 4 ->
+  -- |
+  -- 1. Data bus initiation (master-to-slave)
+  -- 2. The address causing a data-access fault on the data bus
+  -- 3. The misaligned address
+  -- 4. Data bus transaction completed
   (WishboneM2S 4 30, Maybe MachineWord, Maybe MachineWord, Maybe MachineWord, Bool)
-loadStoreUnit instruction instructionFault addr store dBusS2M = case opcode of
+loadStoreUnit instruction instructionFault addr toStore dBusS2M = case opcode of
   LOAD | not instructionFault ->
     let loadData = case loadStoreWidth of
           Byte sign ->
@@ -40,10 +50,10 @@ loadStoreUnit instruction instructionFault addr store dBusS2M = case opcode of
               (slice d15 d0 (readData dBusS2M `shiftR` shiftAmount))
           _ -> readData dBusS2M
      in ( wishboneM2S
-            { addr = slice d31 d2 addr
+            { addr      = slice d31 d2 addr
             , busSelect = mask
-            , busCycle = aligned
-            , strobe = aligned
+            , busCycle  = aligned
+            , strobe    = aligned
             }
         , if not aligned || err dBusS2M || not (acknowledge dBusS2M) then
              Nothing
@@ -56,15 +66,15 @@ loadStoreUnit instruction instructionFault addr store dBusS2M = case opcode of
 
   STORE | not instructionFault ->
     let storeData = case loadStoreWidth of
-          Byte _ -> store `shiftL` shiftAmount
-          Half _ -> store `shiftL` shiftAmount
-          _ -> store
+          Byte _ -> toStore `shiftL` shiftAmount
+          Half _ -> toStore `shiftL` shiftAmount
+          _ -> toStore
      in ( wishboneM2S
-           { addr = slice d31 d2 addr
-           , writeData = storeData
-           , busSelect = mask
-           , busCycle = aligned
-           , strobe = aligned
+           { addr        = slice d31 d2 addr
+           , writeData   = storeData
+           , busSelect   = mask
+           , busCycle    = aligned
+           , strobe      = aligned
            , writeEnable = aligned
            }
         , Nothing

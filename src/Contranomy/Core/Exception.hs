@@ -35,6 +35,16 @@ data ExceptionIn
   , externalInterrupt   :: MachineWord
   }
 
+-- | This function takes care of exception handling, both synchronous exceptions
+-- (traps) and asynchronous exceptions (interrupts). It takes in information
+-- from other functional units whether to raise a trap.
+--
+-- It updates all the relevant Machine CSRs when a trap or interrupt is enterred
+-- and then returns the PC of the trap handler (stored in mtvec).
+--
+-- This function also implements the MRET, machine trap return, instruction
+-- since we need to update the mstatus CSR, and return the PC from before the
+-- trap was entered (stored in mepc)
 handleExceptions ::
   CoreState ->
   ExceptionIn ->
@@ -42,6 +52,9 @@ handleExceptions ::
   Bool ->
   -- | Next PC
   (PC,BitVector 2) ->
+  -- |
+  -- 1. Indication whether a trap or interrupt was raised
+  -- 2. The PC for the next instruction cycle
   State CoreState (Bool,PC)
 handleExceptions CoreState{pc,instruction,machineState} exceptionIn lsFinished (pcN,align) = do
   let ExceptionIn

@@ -14,6 +14,7 @@ import Contranomy.Core.Decode
 import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 
+-- | The branch unit performs the address calculation for the next instruction
 branchUnit ::
   -- | instruction
   MachineWord->
@@ -24,22 +25,28 @@ branchUnit ::
   -- | PC
   PC ->
   -- |
-  -- 1. MSBs of the calculated next PC
-  -- 2. LSBs of the calculated next PC
+  -- We split the calculated next PC into two ranges
+  --
+  -- 1. Upper 30 MSBs of the calculated next PC
+  -- 2. Lower 2 LSBs of the calculated next PC
+  --
+  -- That's because our addresses must be 4-byte aligned. If the lower two
+  -- bits are non-zero, the Exception unit will take ensure that we Trap
   (PC, BitVector 2)
 branchUnit instruction rs1Val rs2Val pc = case opcode of
   BRANCH ->
     let taken = case unpack func3 of
-                  BEQ -> rs1Val == rs2Val
-                  BNE -> rs1Val /= rs2Val
-                  BLT -> (unpack rs1Val :: Signed 32) < unpack rs2Val
-                  BLTU -> rs1Val < rs2Val
-                  BGE -> (unpack rs1Val :: Signed 32) >= unpack rs2Val
-                  BGEU -> rs1Val >= rs2Val
-                  _ -> False
+          BEQ -> rs1Val == rs2Val
+          BNE -> rs1Val /= rs2Val
+          BLT -> (unpack rs1Val :: Signed 32) < unpack rs2Val
+          BLTU -> rs1Val < rs2Val
+          BGE -> (unpack rs1Val :: Signed 32) >= unpack rs2Val
+          BGEU -> rs1Val >= rs2Val
+          _ -> False
+
+        (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
      in if taken then
-          let (offset,align) = split (signExtend imm12B `shiftL` 1 :: MachineWord)
-           in (pc + offset,align)
+          (pc + offset,align)
         else
           (pc + 1, 0)
 

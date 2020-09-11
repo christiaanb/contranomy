@@ -23,6 +23,27 @@ import Contranomy.Core.Decode
 import Contranomy.Core.MachineState
 import Contranomy.Core.SharedTypes
 
+-- | This function implements reading from and writing to control and status
+-- registers (CSR).
+--
+-- Currently implements the following standard RISCV CSRs:
+--
+-- * misa
+-- * mstatus
+-- * mtvec
+-- * mip
+-- * mie
+-- * mscratch
+-- * mepc
+-- * mcause
+-- * mtval
+--
+-- And two uArch specific CSRs for external interrupt handling:
+--
+-- * IRQMASK at address 0x330, the mask for the external interrupt vectors
+-- * IRQPENDING at address 0x360, to know which external interrupt is pending
+--
+-- misa, mip, and IRQPENDING are read-only
 csrUnit ::
   Bool ->
   -- | Instruction
@@ -40,7 +61,10 @@ csrUnit trap instruction rs1Val softwareInterrupt timerInterrupt externalInterru
   -- Is this a CSR operations
   | SYSTEM <- opcode
   , func3 /= 0
-  -- Only update machine state if everything is okay
+  -- Only read and write the machine state if a trap/interrupt hasn't been
+  -- raised. Otherwise we're reading/updating the machine state that was
+  -- altered by the execption handler. Once we return from the trap/interrupt
+  -- handler we can access and update these CSRs in their non-exceptional state.
   , not trap
   = do
 

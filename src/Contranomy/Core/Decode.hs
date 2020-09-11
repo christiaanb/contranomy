@@ -35,6 +35,9 @@ data DecodedInstruction
   , legal  :: Bool
   }
 
+-- | This functions extracts the relavents bits out of an instruction for the
+-- different functional units of the CPU. In addition it checks whether the
+-- instruction is legal and can be executed by the CPU.
 decodeInstruction ::
   MachineWord ->
   DecodedInstruction

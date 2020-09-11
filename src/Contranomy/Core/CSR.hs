@@ -17,6 +17,7 @@ import Data.Generics.Labels ()
 
 import Clash.Prelude
 
+import Contranomy.Clash.Extra
 import Contranomy.Instruction
 import Contranomy.Core.Decode
 import Contranomy.Core.MachineState
@@ -36,33 +37,33 @@ csrUnit ::
   MachineWord ->
   State MachineState (Maybe MachineWord, MachineWord)
 csrUnit trap instruction rs1Val softwareInterrupt timerInterrupt externalInterrupt
+  -- Is this a CSR operations
   | SYSTEM <- opcode
   , func3 /= 0
+  -- Only update machine state if everything is okay
   , not trap
   = do
 
     MachineState
-          {mstatus=MStatus{mie,mpie}
-          ,mie=Mie{meie,mtie,msie}
-          ,mtvec
-          ,mscratch
-          ,mcause=MCause{interrupt,code}
-          ,mtval
-          ,mepc
-          ,irqmask
-          } <- get
+      { mstatus=MStatus{mie,mpie}
+      , mie=Mie{meie,mtie,msie}
+      , mtvec
+      , mscratch
+      , mcause=MCause{interrupt,code}
+      , mtval
+      , mepc
+      , irqmask
+      } <- get
 
-    let csrType = unpack (slice d1 d0 func3)
-        uimm = pack rs1
+    let csrOp   = unpack func3 :: CSROp
 
-    let writeValue0 =
-          if testBit func3 2 then
-            zeroExtend uimm
-          else
-            rs1Val
+    let (writeValue0,csrType) = case csrOp of
+          CSRReg t -> (rs1Val,t)
+          CSRImm t -> (zeroExtend (pack rs1),t)
+
         writeValue1 = case csrType of
           ReadWrite -> Just writeValue0
-          _ | uimm == 0 -> Nothing
+          _ | rs1 == X0 -> Nothing
             | otherwise -> Just writeValue0
 
     case CSRRegister srcDest of
@@ -130,15 +131,18 @@ csrUnit trap instruction rs1Val softwareInterrupt timerInterrupt externalInterru
  where
   DecodedInstruction {opcode,func3,rs1,imm12I=srcDest} = decodeInstruction instruction
 
-  bitB b i = if b then bit i else 0
+csrWrite ::
+  CSRType ->
+  MachineWord ->
+  Maybe MachineWord ->
+  MachineWord
+csrWrite ReadWrite oldValue newValueM =
+  maybe oldValue id newValueM
 
-  csrWrite ::
-    CSRType ->
-    MachineWord ->
-    Maybe MachineWord ->
-    MachineWord
-  csrWrite ReadWrite oldValue newValueM = maybe oldValue id newValueM
-  csrWrite ReadSet oldValue newValueM   = maybe oldValue (oldValue .|.) newValueM
-  csrWrite ReadClear oldValue newValueM = maybe oldValue ((oldValue .&.) . complement) newValueM
-  csrWrite _ oldValue _ = oldValue
-  {-# INLINE csrWrite #-}
+csrWrite ReadSet   oldValue newValueM =
+  maybe oldValue (oldValue .|.) newValueM
+
+csrWrite ReadClear oldValue newValueM =
+  maybe oldValue ((oldValue .&.) . complement) newValueM
+
+csrWrite _ oldValue _ = oldValue

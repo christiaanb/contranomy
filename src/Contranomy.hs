@@ -16,6 +16,7 @@ import Contranomy.RVFI
 
 createDomain vXilinxSystem{vName="Core", vPeriod=hzToPeriod 100e6}
 
+-- | Contranomy RV32I core
 contranomy ::
   "clk" ::: Clock Core ->
   "reset" ::: Reset Core ->
@@ -28,6 +29,7 @@ contranomy clk rst coreIn = withClockResetEnable clk rst enableGen $
 
 makeTopEntity 'contranomy
 
+-- | Contranomy RV32I core with RVFI interface
 contranomyRVFI ::
   "clk" ::: Clock Core ->
   "reset" ::: Reset Core ->

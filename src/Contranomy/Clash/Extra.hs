@@ -41,3 +41,6 @@ downto h l = (1 `shiftL` (h - l + 1) - 1) `shiftL` l
 bitsDownTo :: (Num a, Bits a) => Int -> Int -> a -> a
 bitsDownTo h l = \w -> w .&. downto h l
 {-# INLINE bitsDownTo #-}
+
+bitB :: (Num a, Bits a) => Bool -> Int -> a
+bitB b i = if b then bit i else 0

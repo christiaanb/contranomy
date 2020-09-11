@@ -55,6 +55,7 @@ module Contranomy.Instruction
       , MSCRATCH, MEPC, MCAUSE, MTVAL, MIP, MTINST, MTVAL2
       , IRQMASK, IRQPENDING
       ,.. )
+  , CSROp (..)
   , CSRType
       ( ReadWrite
       , ReadSet
@@ -310,6 +311,17 @@ data CSRType
                   , ConstrRepr 'CSRIllegal (1 `downto` 0) 0b00 []
                   ]) #-}
 deriveBitPack [t| CSRType |]
+
+data CSROp
+  = CSRReg CSRType
+  | CSRImm CSRType
+{-# ANN module (DataReprAnn
+                  $(liftQ [t|CSROp|])
+                  3
+                  [ ConstrRepr 'CSRReg  (2 `downto` 2) 0b0 [0b011]
+                  , ConstrRepr 'CSRImm  (2 `downto` 2) 0b1 [0b011]
+                  ]) #-}
+deriveBitPack [t| CSROp |]
 
 newtype System12 = System12 (BitVector 12)
   deriving newtype Eq

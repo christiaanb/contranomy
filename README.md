@@ -26,16 +26,10 @@ Build the project with:
 stack build
 ```
 
-To run the tests defined in `tests/`, use:
+To compile the project to Verilog, run:
 
 ```bash
-stack test
-```
-
-To compile the project to VHDL, run:
-
-```bash
-stack run clash -- Example.Project --vhdl
+stack run clash -- Contranomy --verilog
 ```
 
 
@@ -49,20 +43,12 @@ clash.cabal build
 
 You only have to run the update command once. After that, you can keep rebuilding your project by running the build command.
 
-To run the tests defined in `tests/`, use:
-
-```bash
-clash.cabal run test-library
-```
-
-To compile the project to VHDL, run:
+To compile the project to Verilog, run:
 
 ```bash
 clash.cabal build --write-ghc-environment-files=always
-clash Example.Project --vhdl
+clash Contranomy --verilog
 ```
-
-Clash will look for a function called `topEntity` in the module you specify and compile that to HDL.
 
 <!-- omit in toc -->
 ### Notes on using snap for your project
@@ -85,16 +71,10 @@ You only have to run the update command once. After that, you can keep rebuildin
 cabal build
 ```
 
-To run the tests defined in `tests/`, use:
+To compile the project to Verilog, run:
 
 ```bash
-cabal run test-library
-```
-
-To compile the project to VHDL, run:
-
-```bash
-cabal run clash -- Example.Project --vhdl
+cabal run clash -- Contranomy --verilog
 ```
 
 

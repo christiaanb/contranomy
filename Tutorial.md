@@ -33,9 +33,10 @@ cd pythondata-cpu-contranomy
 python3 setup.py develop
 ```
 
-Add the installed RISC-V toolchain to you PATH
+Go up one directory and add the installed RISC-V toolchain to you PATH
 
 ```
+cd ..
 PATH=$PATH:$(echo $PWD/riscv64-*/bin/)
 ```
 

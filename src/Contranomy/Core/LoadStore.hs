@@ -61,7 +61,7 @@ loadStoreUnit instruction instructionFault addr toStore dBusS2M = case opcode of
             Just loadData
         , if err dBusS2M then Just addr else Nothing
         , if aligned then Nothing else Just addr
-        , busFinished
+        , not aligned || busFinished
         )
 
   STORE | not instructionFault ->
@@ -80,7 +80,7 @@ loadStoreUnit instruction instructionFault addr toStore dBusS2M = case opcode of
         , Nothing
         , if err dBusS2M then Just addr else Nothing
         , if aligned then Nothing else Just addr
-        , busFinished
+        , not aligned || busFinished
         )
 
   _otherwise ->

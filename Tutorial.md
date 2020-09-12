@@ -13,12 +13,17 @@ git clone -b contranomy https://github.com/christiaanb/litex
 git clone -b contranomy https://github.com/christiaanb/riscv-formal.git
 ```
 
+Create a python virtual env and enter/activate it:
+
+```
+python3 -m virtualenv .
+source bin/activate
+```
+
 Change directory into `litex` and run the following commands
 
 ```
 cd litex
-python3 -m virtualenv .
-source bin/activate
 ./litex_setup.py init
 ./litex_setup.py install
 ./litex_setup.py gcc
@@ -43,5 +48,5 @@ PATH=$PATH:$(echo $PWD/riscv64-*/bin/)
 And check that everything works by running:
 
 ```
-lxsim
+lxsim --cpu-type contranomy
 ```

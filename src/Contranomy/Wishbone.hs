@@ -2,6 +2,8 @@
 Copyright  :  (C) 2020, Christiaan Baaij
 License    :  BSD2 (see the file LICENSE)
 Maintainer :  Christiaan Baaij <christiaan.baaij@gmail.com>
+
+See: http://cdn.opencores.org/downloads/wbspec_b4.pdf
 -}
 
 {-# LANGUAGE PatternSynonyms #-}

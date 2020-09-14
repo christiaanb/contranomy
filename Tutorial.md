@@ -23,7 +23,7 @@ python3 -m virtualenv .
 source bin/activate
 ```
 
-Install the `pythondata-cpu-contranomy` package into the virtual environement
+Install the `pythondata-cpu-contranomy` package into the virtual environment
 
 ```
 cd pythondata-cpu-contranomy
@@ -53,7 +53,7 @@ And check that everything works by running:
 lxsim --cpu-type contranomy
 ```
 
-You can exit the simulator by pression `Ctrl+C` and the close the virtual environment with
+You can exit the simulator by pressing `Ctrl+C` and the close the virtual environment with
 
 ```
 deactivate
@@ -84,7 +84,7 @@ cd contranomy
 stack run clash -- --verilog Contranomy
 ```
 
-Next, go to the `contranomy` cores direction in `riscv-formal`:
+Next, go to the `contranomy` cores directory in `riscv-formal`:
 
 ```
 cd ..
@@ -94,8 +94,8 @@ cd riscv-formal/cores/contranomy
 And copy the relevant `.v` and `.inc` file
 
 ```
-cp ../../../contranomy/verilog/Contranomy/contranomyRFVI/contranomyRVFI.v ./
-cp ../../../contranomy/verilog/Contranomy/contranomyRFVI/ContranomyCoreMachineStateDirect.inc ./
+cp ../../../contranomy/verilog/Contranomy/contranomyRVFI/contranomyRVFI.v ./
+cp ../../../contranomy/verilog/Contranomy/contranomyRVFI/ContranomyCoreMachineStateDirect.inc ./
 ```
 
 Then create all the tests:

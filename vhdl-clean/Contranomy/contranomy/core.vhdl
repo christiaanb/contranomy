@@ -544,10 +544,8 @@ begin
   -- src/Contranomy/Core.hs:134:35-50
   -- src/Contranomy/Core.hs:131:7-49
   -- src/Contranomy/Core.hs:131:26-49
-  \c$ds14_app_arg\ <= true when ipv else
+  \c$ds14_app_arg\ <= true when result_10(0) = '1' else
                       \c$ds14_case_alt\;
-
-  ipv <= boolean'(contranomy_types.fromSLV(result_10(0 downto 0)));
 
   \c$ds14_case_alt_selection\ <= \c$decodeInstructionOut\.decodedinstruction_sel16_legal;
 
@@ -557,15 +555,13 @@ begin
   \c$case_alt_selection\ <= eta.tup2_sel0_corein.corein_sel0_ibuss2m.wishbones2m_sel2_err;
 
   -- src/Contranomy/Wishbone.hs:42:5-7
-  \c$case_alt\ <= std_logic_vector'("1" & (contranomy_types.toSLV(true))) when \c$case_alt_selection\ else
-                  \c$case_alt_0\;
+  \c$case_alt\ <= EXECUTE_FAULT when \c$case_alt_selection\ else \c$case_alt_0\;
 
   \c$case_alt_0_selection\ <= eta.tup2_sel0_corein.corein_sel0_ibuss2m.wishbones2m_sel1_acknowledge;
 
   -- src/Contranomy/Core.hs:(103,18)-(106,30)
   -- src/Contranomy/Wishbone.hs:40:5-15
-  \c$case_alt_0\ <= std_logic_vector'("1" & (contranomy_types.toSLV(false))) when \c$case_alt_0_selection\ else
-                    std_logic_vector'("0" & "-");
+  \c$case_alt_0\ <= EXECUTE_NO_FAULT when \c$case_alt_0_selection\ else INSTRUCTION_FETCH;
 
   decodeinstruction_cdecodeinstructionout : entity decodeinstruction
     port map

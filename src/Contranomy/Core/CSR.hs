@@ -23,6 +23,7 @@ import Contranomy.Core.Decode
 import Contranomy.Core.MachineState
 import Contranomy.Core.SharedTypes
 
+{-# NOINLINE csrUnit #-}
 -- | This function implements reading from and writing to control and status
 -- registers (CSR).
 --

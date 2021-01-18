@@ -14,6 +14,7 @@ import Contranomy.Core.Decode
 import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 
+{-# NOINLINE branchUnit #-}
 -- | The branch unit performs the address calculation for the next instruction
 branchUnit ::
   -- | instruction

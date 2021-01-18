@@ -16,6 +16,7 @@ import Contranomy.Instruction
 import Contranomy.RVFI
 import Contranomy.Wishbone
 
+{-# NOINLINE toRVFI #-}
 toRVFI ::
   -- | Load/Store unit has finished
   Bool ->

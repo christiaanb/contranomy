@@ -15,6 +15,7 @@ import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 import Contranomy.Wishbone
 
+{-# NOINLINE loadStoreUnit #-}
 -- | This function performs data-bus transactions for loads and stores.
 --
 -- It does not initiate the transaction if the address is misaligned for the

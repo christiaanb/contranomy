@@ -15,6 +15,7 @@ import Contranomy.Core.Decode
 import Contranomy.Core.SharedTypes
 import Contranomy.Instruction
 
+{-# NOINLINE alu #-}
 -- | The ALU implements the following instructions, or at least parts of them
 --
 -- * LUI

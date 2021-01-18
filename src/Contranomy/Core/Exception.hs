@@ -35,6 +35,7 @@ data ExceptionIn
   , externalInterrupt   :: MachineWord
   }
 
+{-# NOINLINE handleExceptions #-}
 -- | This function takes care of exception handling, both synchronous exceptions
 -- (traps) and asynchronous exceptions (interrupts). It takes in information
 -- from other functional units whether to raise a trap.

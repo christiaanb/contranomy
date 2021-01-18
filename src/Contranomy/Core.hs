@@ -57,6 +57,7 @@ data CoreOut
 coreOut :: CoreOut
 coreOut = CoreOut { iBusM2S = wishboneM2S, dBusM2S = wishboneM2S }
 
+{-# NOINLINE core #-}
 core ::
   HiddenClockResetEnable dom =>
   (Signal dom CoreIn, Signal dom (MachineWord, MachineWord)) ->

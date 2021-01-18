@@ -11,6 +11,7 @@ import Clash.Prelude
 
 import Contranomy.Instruction
 
+{-# NOINLINE registerFile #-}
 -- | 32-space register file with 2 read ports and 1 write port
 registerFile ::
   (HiddenClockResetEnable dom, Num a, NFDataX a) =>

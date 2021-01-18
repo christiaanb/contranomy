@@ -3,19 +3,69 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
 
 package contranomy_types is
+  -- iop
+  subtype iop is std_logic_vector(2 downto 0);
 
-  type reg is
+  constant IOP_ADD  : iop := "000";
+  constant IOP_SLL  : iop := "001";
+  constant IOP_SLT  : iop := "010";
+  constant IOP_SLTU : iop := "011";
+  constant IOP_XOR  : iop := "100";
+  constant IOP_SR   : iop := "101";
+  constant IOP_OR   : iop := "110";
+  constant IOP_AND  : iop := "111";
+
+  type Reg is
       ( x0,  x1,  x2,  x3,  x4,  x5,  x6,  x7
       , x8,  x9,  x10, x11, x12, x13, x14, x15
       , x16, x17, x18, x19, x20, x21, x22, x23
       , x24, x25, x26, x27, x28, x29, x30, x31
   );
 
+  -- exception_in
+  subtype maybe_machineword is std_logic_vector(32 downto 0);
+  type exception_in is record
+    ei_instraccessfault      : boolean;
+    ei_instr_addr_misaligned : boolean;
+    ei_instr_illegal         : boolean;
+    ei_data_access_fault     : contranomy_types.maybe_machineword;
+    ei_data_addr_misaligned  : contranomy_types.maybe_machineword;
+    ei_timer_interrupt       : boolean;
+    ei_software_interrupt    : boolean;
+    ei_external_interrupt    : std_logic_vector(31 downto 0);
+  end record;
+
+  -- CoreStage
+  subtype corestage is std_logic_vector(1 downto 0);
+
+  constant INSTRUCTION_FETCH : corestage := "00";
+  constant EXECUTE_NO_FAULT  : corestage := "10";
+  constant EXECUTE_FAULT     : corestage := "11";
+
+  -- mop
   subtype mop is std_logic_vector(2 downto 0);
+
+  constant MOP_MUL    : mop := "000";
+  constant MOP_MULH   : mop := "001";
+  constant MOP_MULHSU : mop := "010";
+  constant MOP_MULHU  : mop := "011";
+  constant MOP_DIV    : mop := "100";
+  constant MOP_DIVU   : mop := "101";
+  constant MOP_REM    : mop := "110";
+  constant MOP_REMU   : mop := "111";
+
+
+  subtype machine_word is std_logic_vector(31 downto 0);
+  subtype pc is std_logic_vector(29 downto 0);
+
+  subtype timer_interrupt is std_logic;
+  subtype software_interrupt is std_logic;
+  subtype external_interrupt is std_logic;
+
   subtype clk_core is std_logic;
 
+  -- dirty types
 
-  subtype corestage is std_logic_vector(1 downto 0);
   subtype register_r is std_logic_vector(4 downto 0);
   subtype bursttypeextension is std_logic_vector(1 downto 0);
 
@@ -30,7 +80,6 @@ package contranomy_types is
     mstatus_sel1_mpie : boolean;
   end record;
   subtype csrtype is std_logic_vector(1 downto 0);
-  subtype iop is std_logic_vector(2 downto 0);
   type array_of_std_logic_vector_32 is array (integer range <>) of std_logic_vector(31 downto 0);
 
   type decodedinstruction is record
@@ -193,6 +242,7 @@ package contranomy_types is
     tup2_0_sel1_corestate : contranomy_types.corestate;
   end record;
   subtype maybe_0 is std_logic_vector(32 downto 0);
+
   type tup5 is record
     tup5_sel0_wishbonem2s : contranomy_types.wishbonem2s;
     tup5_sel1_maybe_0_0 : contranomy_types.maybe_0;
@@ -200,16 +250,7 @@ package contranomy_types is
     tup5_sel3_maybe_0_2 : contranomy_types.maybe_0;
     tup5_sel4_boolean : boolean;
   end record;
-  type exceptionin is record
-    exceptionin_sel0_instraccessfault : boolean;
-    exceptionin_sel1_instraddrmisaligned : boolean;
-    exceptionin_sel2_instrillegal : boolean;
-    exceptionin_sel3_dataaccessfault : contranomy_types.maybe_0;
-    exceptionin_sel4_dataaddrmisaligned : contranomy_types.maybe_0;
-    exceptionin_sel5_timerinterrupt : boolean;
-    exceptionin_sel6_softwareinterrupt : boolean;
-    exceptionin_sel7_externalinterrupt : std_logic_vector(31 downto 0);
-  end record;
+
   type tup2_1 is record
     tup2_1_sel0_maybe_0 : contranomy_types.maybe_0;
     tup2_1_sel1_std_logic_vector : std_logic_vector(31 downto 0);
@@ -284,8 +325,8 @@ package contranomy_types is
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_0;
   function toSLV (p : contranomy_types.tup5) return std_logic_vector;
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup5;
-  function toSLV (p : contranomy_types.exceptionin) return std_logic_vector;
-  function fromSLV (slv : in std_logic_vector) return contranomy_types.exceptionin;
+  function toSLV (p : contranomy_types.exception_in) return std_logic_vector;
+  function fromSLV (slv : in std_logic_vector) return contranomy_types.exception_in;
   function toSLV (p : contranomy_types.tup2_1) return std_logic_vector;
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_1;
   function toSLV (p : contranomy_types.tup2_2) return std_logic_vector;
@@ -612,11 +653,11 @@ package body contranomy_types is
   begin
     return (fromSLV(islv(0 to 73)),fromSLV(islv(74 to 106)),fromSLV(islv(107 to 139)),fromSLV(islv(140 to 172)),fromSLV(islv(173 to 173)));
   end;
-  function toSLV (p : contranomy_types.exceptionin) return std_logic_vector is
+  function toSLV (p : contranomy_types.exception_in) return std_logic_vector is
   begin
-    return (toSLV(p.exceptionin_sel0_instraccessfault) & toSLV(p.exceptionin_sel1_instraddrmisaligned) & toSLV(p.exceptionin_sel2_instrillegal) & toSLV(p.exceptionin_sel3_dataaccessfault) & toSLV(p.exceptionin_sel4_dataaddrmisaligned) & toSLV(p.exceptionin_sel5_timerinterrupt) & toSLV(p.exceptionin_sel6_softwareinterrupt) & toSLV(p.exceptionin_sel7_externalinterrupt));
+    return (toSLV(p.ei_instraccessfault) & toSLV(p.ei_instr_addr_misaligned) & toSLV(p.ei_instr_illegal) & toSLV(p.ei_data_access_fault) & toSLV(p.ei_data_addr_misaligned) & toSLV(p.ei_timer_interrupt) & toSLV(p.ei_software_interrupt) & toSLV(p.ei_external_interrupt));
   end;
-  function fromSLV (slv : in std_logic_vector) return contranomy_types.exceptionin is
+  function fromSLV (slv : in std_logic_vector) return contranomy_types.exception_in is
   alias islv : std_logic_vector(0 to slv'length - 1) is slv;
   begin
     return (fromSLV(islv(0 to 0)),fromSLV(islv(1 to 1)),fromSLV(islv(2 to 2)),fromSLV(islv(3 to 35)),fromSLV(islv(36 to 68)),fromSLV(islv(69 to 69)),fromSLV(islv(70 to 70)),fromSLV(islv(71 to 102)));
@@ -639,5 +680,116 @@ package body contranomy_types is
   begin
     return (fromSLV(islv(0 to 64)),fromSLV(islv(65 to 232)));
   end;
+
+  -- constants
+  constant INSTRUCTION_ADDRESS_MISALIGNED : mcause := (False, "0000");
+  constant INSTRUCTION_ACCESS_FAULT       : mcause := (False, "0001");
+  constant ILLEGAL_INSTRUCTION            : mcause := (False, "0010");
+  constant BREAKPOINT                     : mcause := (False, "0011");
+  constant LOAD_ADDRESS_MISALIGNED        : mcause := (False, "0100");
+  constant LOAD_ACCESS_FAULT              : mcause := (False, "0101");
+  constant STORE_ADDRESS_MISALIGNED       : mcause := (False, "0110");
+  constant STORE_ACCESS_FAULT             : mcause := (False, "0111");
+  constant ENVIRONMENT_CALL               : mcause := (False, "1011");
+  constant MACHINE_SOFTWARE_INTERRUPT     : mcause := (True,  "0011");
+  constant MACHINE_TIMER_INTERRUPT        : mcause := (True,  "0111");
+  constant MACHINE_EXTERNAL_INTERRUPT     : mcause := (True,  "1011");
+
+  -- opcode
+  subtype opcode is std_logic_vector(6 downto 0);
+
+  constant LUI      : opcode := "0110111";
+  constant AUIPC    : opcode := "0010111";
+  constant JAL      : opcode := "1101111";
+  constant JALR     : opcode := "1100111";
+  constant BRANCH   : opcode := "1100011";
+  constant LOAD     : opcode := "0000011";
+  constant STORE    : opcode := "0100011";
+  constant OP_IMM   : opcode := "0010011";
+  constant OP       : opcode := "0110011";
+  constant MISC_MEM : opcode := "0001111";
+  constant SYSTEM   : opcode := "1110011";
+
+
+  -- Load Store Width
+
+  subtype lsw is std_logic_vector(2 downto 0);
+
+  constant LSW_UBYTE : lsw := "100";
+  constant LSW_SBYTE : lsw := "000";
+  constant LSW_UHALF : lsw := "101";
+  constant LSW_SHALF : lsw := "001";
+  constant LSW_WORD  : lsw := "010";
+  -- constant LSW_ILL1  : lsw := "011";
+  -- constant LSW_ILL2  : lsw := "110";
+  -- constant LSW_ILL3  : lsw := "111";
+
+  -- Branch Condition
+
+  subtype branch_cond is std_logic_vector(2 downto 0);
+
+  constant BC_EQ   : branch_cond := "000";
+  constant BC_NE   : branch_cond := "001";
+  constant BC_LT   : branch_cond := "010";
+  constant BC_GE   : branch_cond := "011";
+  constant BC_LTU  : branch_cond := "100";
+  constant BC_GEU  : branch_cond := "101";
+  constant BC_ILL1 : branch_cond := "110";
+  constant BC_ILL2 : branch_cond := "111";
+
+  -- Machine Trap Setup
+
+  subtype csr_register is std_logic_vector(11 downto 0);
+
+  constant CSR_MSTATUS    : csr_register := x"300"; -- Machine status register
+  constant CSR_MISA       : csr_register := x"301"; -- ISA and extensions
+  constant CSR_MEDELEG    : csr_register := x"302"; -- Machine exception delegation register
+  constant CSR_MIDELEG    : csr_register := x"303"; -- Machine interrupt delegation register
+  constant CSR_MIE        : csr_register := x"304"; -- Machine interrupt enable register
+  constant CSR_MTVEC      : csr_register := x"305"; -- Machine trap-handler base address
+  constant CSR_MCOUNTEREN : csr_register := x"306"; -- Machine counter enable
+  constant CSR_MSTATUSH   : csr_register := x"307"; -- Additional machine status register, RV32 only
+
+  -- Machine Trap Handling
+
+  constant TRAP_MSCRATCH : csr_register := x"340"; -- Scratch register for machine trap handlers
+  constant TRAP_MEPC     : csr_register := x"341"; -- Machine exception program counter
+  constant TRAP_MCAUSE   : csr_register := x"342"; -- Machine trap cause
+  constant TRAP_MTVAL    : csr_register := x"343"; -- Machine bad address instruction
+  constant TRAP_MIP      : csr_register := x"344"; -- Machine interrupt pending
+  constant TRAP_MTINST   : csr_register := x"34A"; -- Machine trap instruction (transformed)
+  constant TRAP_MTVAL2   : csr_register := x"34B"; -- Machine bad guest physical address
+
+  -- Architecture-specific Registers
+
+  constant IRQMASK    : csr_register := x"330";
+  constant IEQPENDING : csr_register := x"360";
+
+  -- CSR Type
+
+  subtype csr_type is std_logic_vector(1 downto 0);
+
+  constant CSR_ILL    : csr_type := "00";
+  constant READ_WRITE : csr_type := "01";
+  constant READ_SET   : csr_type := "10";
+  constant READ_CLEAR : csr_type := "11";
+
+  -- System12
+
+  subtype system_12 is std_logic_vector(11 downto 0);
+
+  constant ECALL  : system_12 := (others => '0');
+  constant EBREAK : system_12 := (0 => '1', others => '0');
+  constant MRET   : system_12 := "001100000010";
+
+  -- Wishbone Cycle Type Identifier
+
+  subtype cycle_type_identifier is std_logic_vector(2 downto 0);
+
+  constant CLASSIC                : cycle_type_identifier := "000";
+  constant CONSTANT_ADDRESS_BURST : cycle_type_identifier := "001";
+  constant INCREMENTING_BURST     : cycle_type_identifier := "010";
+  constant END_OF_BURST           : cycle_type_identifier := "111";
+
 end;
 

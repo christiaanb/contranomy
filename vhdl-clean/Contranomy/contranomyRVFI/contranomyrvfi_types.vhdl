@@ -196,15 +196,15 @@ package contranomyrvfi_types is
     tup5_sel3_maybe_0_2 : contranomyrvfi_types.maybe_0;
     tup5_sel4_boolean : boolean;
   end record;
-  type exceptionin is record
-    exceptionin_sel0_instraccessfault : boolean;
-    exceptionin_sel1_instraddrmisaligned : boolean;
-    exceptionin_sel2_instrillegal : boolean;
-    exceptionin_sel3_dataaccessfault : contranomyrvfi_types.maybe_0;
-    exceptionin_sel4_dataaddrmisaligned : contranomyrvfi_types.maybe_0;
-    exceptionin_sel5_timerinterrupt : boolean;
-    exceptionin_sel6_softwareinterrupt : boolean;
-    exceptionin_sel7_externalinterrupt : std_logic_vector(31 downto 0);
+  type exception_in is record
+    ei_instraccessfault : boolean;
+    ei_instr_addr_misaligned : boolean;
+    ei_instr_illegal : boolean;
+    ei_data_access_fault : contranomyrvfi_types.maybe_0;
+    ei_data_addr_misaligned : contranomyrvfi_types.maybe_0;
+    ei_timer_interrupt : boolean;
+    ei_software_interrupt : boolean;
+    ei_external_interrupt : std_logic_vector(31 downto 0);
   end record;
   type tup2_1 is record
     tup2_1_sel0_maybe_0 : contranomyrvfi_types.maybe_0;
@@ -282,8 +282,8 @@ package contranomyrvfi_types is
   function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.tup2_0;
   function toSLV (p : contranomyrvfi_types.tup5) return std_logic_vector;
   function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.tup5;
-  function toSLV (p : contranomyrvfi_types.exceptionin) return std_logic_vector;
-  function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.exceptionin;
+  function toSLV (p : contranomyrvfi_types.exception_in) return std_logic_vector;
+  function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.exception_in;
   function toSLV (p : contranomyrvfi_types.tup2_1) return std_logic_vector;
   function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.tup2_1;
   function toSLV (p : contranomyrvfi_types.tup2_2) return std_logic_vector;
@@ -619,11 +619,11 @@ package body contranomyrvfi_types is
   begin
     return (fromSLV(islv(0 to 73)),fromSLV(islv(74 to 106)),fromSLV(islv(107 to 139)),fromSLV(islv(140 to 172)),fromSLV(islv(173 to 173)));
   end;
-  function toSLV (p : contranomyrvfi_types.exceptionin) return std_logic_vector is
+  function toSLV (p : contranomyrvfi_types.exception_in) return std_logic_vector is
   begin
-    return (toSLV(p.exceptionin_sel0_instraccessfault) & toSLV(p.exceptionin_sel1_instraddrmisaligned) & toSLV(p.exceptionin_sel2_instrillegal) & toSLV(p.exceptionin_sel3_dataaccessfault) & toSLV(p.exceptionin_sel4_dataaddrmisaligned) & toSLV(p.exceptionin_sel5_timerinterrupt) & toSLV(p.exceptionin_sel6_softwareinterrupt) & toSLV(p.exceptionin_sel7_externalinterrupt));
+    return (toSLV(p.ei_instraccessfault) & toSLV(p.ei_instr_addr_misaligned) & toSLV(p.ei_instr_illegal) & toSLV(p.ei_data_access_fault) & toSLV(p.ei_data_addr_misaligned) & toSLV(p.ei_timer_interrupt) & toSLV(p.ei_software_interrupt) & toSLV(p.ei_external_interrupt));
   end;
-  function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.exceptionin is
+  function fromSLV (slv : in std_logic_vector) return contranomyrvfi_types.exception_in is
   alias islv : std_logic_vector(0 to slv'length - 1) is slv;
   begin
     return (fromSLV(islv(0 to 0)),fromSLV(islv(1 to 1)),fromSLV(islv(2 to 2)),fromSLV(islv(3 to 35)),fromSLV(islv(36 to 68)),fromSLV(islv(69 to 69)),fromSLV(islv(70 to 70)),fromSLV(islv(71 to 102)));

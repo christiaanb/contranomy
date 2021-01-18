@@ -9,7 +9,7 @@ use work.contranomy_types.all;
 
 entity handleexceptions is
   port(ds            : in contranomy_types.corestate;
-       \exceptionIn\ : in contranomy_types.exceptionin;
+       \exceptionIn\ : in contranomy_types.exception_in;
        \lsFinished\  : in boolean;
        ds1           : in contranomy_types.tup2_5;
        \c$arg\       : in contranomy_types.corestate;
@@ -165,26 +165,26 @@ architecture structural of handleexceptions is
   signal ds15_fun_arg                       : std_logic_vector(31 downto 0);
 
 begin
-  result_0_selection <= \exceptionIn\.exceptionin_sel0_instraccessfault;
+  result_0_selection <= \exceptionIn\.ei_instraccessfault;
 
   result_0 <= result_1 when result_0_selection else
               \c$case_alt\;
 
-  \c$case_alt_selection\ <= \exceptionIn\.exceptionin_sel1_instraddrmisaligned;
+  \c$case_alt_selection\ <= \exceptionIn\.ei_instr_addr_misaligned;
 
   -- src/Contranomy/Core/Exception.hs:(92,29)-(93,82)
   -- src/Contranomy/Core/Exception.hs:70:13-23
   \c$case_alt\ <= result_1 when \c$case_alt_selection\ else
                   \c$case_alt_0\;
 
-  \c$case_alt_0_selection\ <= \exceptionIn\.exceptionin_sel2_instrillegal;
+  \c$case_alt_0_selection\ <= \exceptionIn\.ei_instr_illegal;
 
   -- src/Contranomy/Core/Exception.hs:(92,52)-(93,82)
   -- src/Contranomy/Core/Exception.hs:70:13-23
   \c$case_alt_0\ <= result_1 when \c$case_alt_0_selection\ else
                     \c$case_alt_1\;
 
-  \c$case_alt_1_selection\ <= \exceptionIn\.exceptionin_sel3_dataaccessfault;
+  \c$case_alt_1_selection\ <= \exceptionIn\.ei_data_access_fault;
 
   -- src/Contranomy/Core/Exception.hs:93:9-82
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -192,7 +192,7 @@ begin
     \c$case_alt_1\ <= \c$case_alt_2\ when "0",
                       result_1 when others;
 
-  \c$case_alt_2_selection\ <= \exceptionIn\.exceptionin_sel4_dataaddrmisaligned;
+  \c$case_alt_2_selection\ <= \exceptionIn\.ei_data_addr_misaligned;
 
   -- src/Contranomy/Core/Exception.hs:93:35-82
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -297,21 +297,21 @@ begin
                       ds.corestate_sel3_machinestate.machinestate_sel2_mtvec(31 downto 2) when std_match("------------------------------01", \c$eta_case_alt_selection\) else
                       std_logic_vector'(0 to 29 => '-');
 
-  \c$b1_app_arg_selection\ <= \exceptionIn\.exceptionin_sel1_instraddrmisaligned;
+  \c$b1_app_arg_selection\ <= \exceptionIn\.ei_instr_addr_misaligned;
 
   -- src/Contranomy/Core/Exception.hs:(136,23)-(148,32)
   -- src/Contranomy/Core/Exception.hs:70:13-23
   \c$b1_app_arg\ <= std_logic_vector'(std_logic_vector'(\pcN\) & std_logic_vector'(align)) when \c$b1_app_arg_selection\ else
                     \c$b1_case_alt\;
 
-  \c$b1_case_alt_selection\ <= \exceptionIn\.exceptionin_sel2_instrillegal;
+  \c$b1_case_alt_selection\ <= \exceptionIn\.ei_instr_illegal;
 
   -- src/Contranomy/Core/Exception.hs:(138,28)-(148,32)
   -- src/Contranomy/Core/Exception.hs:70:13-23
   \c$b1_case_alt\ <= ds.corestate_sel2_instruction when \c$b1_case_alt_selection\ else
                      \c$b1_case_alt_0\;
 
-  \c$b1_case_alt_0_selection\ <= \exceptionIn\.exceptionin_sel0_instraccessfault;
+  \c$b1_case_alt_0_selection\ <= \exceptionIn\.ei_instraccessfault;
 
   -- src/Contranomy/Core/Exception.hs:(140,28)-(148,32)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -325,7 +325,7 @@ begin
   -- src/Contranomy/Core/Exception.hs:143:25-32
   \c$b1_case_alt_2\ <= std_logic_vector'(std_logic_vector'(ds.corestate_sel1_pc) & std_logic_vector'(std_logic_vector'("00")));
 
-  \c$b1_case_alt_3_selection\ <= \exceptionIn\.exceptionin_sel4_dataaddrmisaligned;
+  \c$b1_case_alt_3_selection\ <= \exceptionIn\.ei_data_addr_misaligned;
 
   -- src/Contranomy/Core/Exception.hs:(144,28)-(148,32)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -333,9 +333,9 @@ begin
     \c$b1_case_alt_3\ <= \c$b1_case_alt_4\ when "0",
                          addr when others;
 
-  addr <= \exceptionIn\.exceptionin_sel4_dataaddrmisaligned(31 downto 0);
+  addr <= \exceptionIn\.ei_data_addr_misaligned(31 downto 0);
 
-  \c$b1_case_alt_4_selection\ <= \exceptionIn\.exceptionin_sel3_dataaccessfault;
+  \c$b1_case_alt_4_selection\ <= \exceptionIn\.ei_data_access_fault;
 
   -- src/Contranomy/Core/Exception.hs:(146,30)-(148,32)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -343,13 +343,13 @@ begin
     \c$b1_case_alt_4\ <= std_logic_vector'(x"00000000") when "0",
                          addr_0 when others;
 
-  addr_0 <= \exceptionIn\.exceptionin_sel3_dataaccessfault(31 downto 0);
+  addr_0 <= \exceptionIn\.ei_data_access_fault(31 downto 0);
 
   -- src/Contranomy/Core/Exception.hs:(109,23)-(133,57)
   \c$b1_app_arg_0\ <= \c$b1_case_alt_5\ when interrupt else
                       \c$b1_case_alt_6\;
 
-  \c$b1_case_alt_5_selection\ <= \exceptionIn\.exceptionin_sel6_softwareinterrupt;
+  \c$b1_case_alt_5_selection\ <= \exceptionIn\.ei_software_interrupt;
 
   -- src/Contranomy/Core/Exception.hs:(110,25)-(115,52)
   -- src/Contranomy/Core/Exception.hs:99:7-52
@@ -358,7 +358,7 @@ begin
   \c$b1_case_alt_5\ <= \c$b1_case_alt_7\ when \c$b1_case_alt_5_selection\ else
                        \c$b1_case_alt_8\;
 
-  \c$b1_case_alt_6_selection\ <= \exceptionIn\.exceptionin_sel0_instraccessfault;
+  \c$b1_case_alt_6_selection\ <= \exceptionIn\.ei_instraccessfault;
 
   -- src/Contranomy/Core/Exception.hs:(117,25)-(133,57)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -372,7 +372,7 @@ begin
                        , mcause_sel1_code => std_logic_vector'(x"3") ) when \c$b1_case_alt_7_selection\ else
                        \c$b1_case_alt_8\;
 
-  \c$b1_case_alt_8_selection\ <= \exceptionIn\.exceptionin_sel5_timerinterrupt;
+  \c$b1_case_alt_8_selection\ <= \exceptionIn\.ei_timer_interrupt;
 
   -- src/Contranomy/Core/Exception.hs:(112,30)-(115,52)
   -- src/Contranomy/Core/Exception.hs:98:7-49
@@ -389,7 +389,7 @@ begin
                        ( mcause_sel0_interrupt => true
                        , mcause_sel1_code => std_logic_vector'(x"B") );
 
-  \c$b1_case_alt_10_selection\ <= \exceptionIn\.exceptionin_sel2_instrillegal;
+  \c$b1_case_alt_10_selection\ <= \exceptionIn\.ei_instr_illegal;
 
   -- src/Contranomy/Core/Exception.hs:(119,30)-(133,57)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -397,7 +397,7 @@ begin
                         , mcause_sel1_code => std_logic_vector'(x"2") ) when \c$b1_case_alt_10_selection\ else
                         \c$b1_case_alt_11\;
 
-  \c$b1_case_alt_11_selection\ <= \exceptionIn\.exceptionin_sel1_instraddrmisaligned;
+  \c$b1_case_alt_11_selection\ <= \exceptionIn\.ei_instr_addr_misaligned;
 
   -- src/Contranomy/Core/Exception.hs:(121,30)-(133,57)
   -- src/Contranomy/Core/Exception.hs:70:13-23
@@ -435,7 +435,7 @@ begin
   \c$interrupt_case_alt\ <= result_2 when \c$interrupt_case_alt_selection\ else
                             false;
 
-  result_2_selection <= \exceptionIn\.exceptionin_sel5_timerinterrupt;
+  result_2_selection <= \exceptionIn\.ei_timer_interrupt;
 
   -- src/Contranomy/Core/Exception.hs:102:30-90
   -- src/Contranomy/Core/Exception.hs:98:7-49
@@ -451,7 +451,7 @@ begin
   \c$interrupt_case_alt_0\ <= true when \c$interrupt_case_alt_0_selection\ else
                               result_3;
 
-  result_3_selection <= \exceptionIn\.exceptionin_sel6_softwareinterrupt;
+  result_3_selection <= \exceptionIn\.ei_software_interrupt;
 
   -- src/Contranomy/Core/Exception.hs:102:50-89
   -- src/Contranomy/Core/Exception.hs:99:7-52
@@ -467,7 +467,7 @@ begin
   \c$$j_case_alt\ <= true when \c$$j_case_alt_selection\ else
                      \$j1\;
 
-  \c$$j1_selection_res\ <= (\exceptionIn\.exceptionin_sel7_externalinterrupt and ds.corestate_sel3_machinestate.machinestate_sel7_irqmask) /= std_logic_vector'(x"00000000");
+  \c$$j1_selection_res\ <= (\exceptionIn\.ei_external_interrupt and ds.corestate_sel3_machinestate.machinestate_sel7_irqmask) /= std_logic_vector'(x"00000000");
 
   -- src/Contranomy/Core/Exception.hs:102:72-89
   -- src/Contranomy/Core/Exception.hs:100:7-73

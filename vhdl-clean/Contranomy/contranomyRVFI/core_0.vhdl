@@ -196,7 +196,7 @@ architecture structural of core_0 is
   signal \c$case_scrut_fun_arg_0\                  : boolean;
   signal \c$case_scrut_fun_arg_1\                  : std_logic_vector(31 downto 0);
   signal \c$case_scrut_0_fun_arg\                  : contranomyrvfi_types.corestate;
-  signal \c$case_scrut_0_fun_arg_0\                : contranomyrvfi_types.exceptionin;
+  signal \c$case_scrut_0_fun_arg_0\                : contranomyrvfi_types.exception_in;
   signal \c$case_scrut_0_fun_arg_1\                : contranomyrvfi_types.corestate;
   signal ds14_fun_arg                              : contranomyrvfi_types.wishbones2m;
   signal \c$ds14_case_alt_selection\               : boolean;
@@ -482,14 +482,14 @@ begin
                               , corestate_sel3_machinestate => result_7
                               , corestate_sel4_rvfiorder => result_3 );
 
-  \c$case_scrut_0_fun_arg_0\ <= ( exceptionin_sel0_instraccessfault => ipv
-                                , exceptionin_sel1_instraddrmisaligned => y /= std_logic_vector'("00")
-                                , exceptionin_sel2_instrillegal => \c$ds14_case_alt\
-                                , exceptionin_sel3_dataaccessfault => ds14.tup5_sel2_maybe_0_1
-                                , exceptionin_sel4_dataaddrmisaligned => ds14.tup5_sel3_maybe_0_2
-                                , exceptionin_sel5_timerinterrupt => eta.tup2_sel0_corein.corein_sel2_timerinterrupt
-                                , exceptionin_sel6_softwareinterrupt => eta.tup2_sel0_corein.corein_sel3_softwareinterrupt
-                                , exceptionin_sel7_externalinterrupt => eta.tup2_sel0_corein.corein_sel4_externalinterrupt );
+  \c$case_scrut_0_fun_arg_0\ <= ( ei_instraccessfault => ipv
+                                , ei_instr_addr_misaligned => y /= std_logic_vector'("00")
+                                , ei_instr_illegal => \c$ds14_case_alt\
+                                , ei_data_access_fault => ds14.tup5_sel2_maybe_0_1
+                                , ei_data_addr_misaligned => ds14.tup5_sel3_maybe_0_2
+                                , ei_timer_interrupt => eta.tup2_sel0_corein.corein_sel2_timerinterrupt
+                                , ei_software_interrupt => eta.tup2_sel0_corein.corein_sel3_softwareinterrupt
+                                , ei_external_interrupt => eta.tup2_sel0_corein.corein_sel4_externalinterrupt );
 
   \c$case_scrut_0_fun_arg_1\ <= ( corestate_sel0_stage => result_10
                                 , corestate_sel1_pc => result_9

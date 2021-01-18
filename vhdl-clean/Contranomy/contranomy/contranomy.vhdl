@@ -6,7 +6,6 @@ use IEEE.MATH_REAL.ALL;
 use std.textio.all;
 use work.all;
 use work.contranomy_types.all;
-use work.constants.all;
 
 entity contranomy is
   port(-- clock

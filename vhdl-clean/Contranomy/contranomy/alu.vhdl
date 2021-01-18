@@ -61,7 +61,7 @@ architecture structural of alu is
   signal \c$alu_$jOut_case_alt\                                  : contranomy_types.iop;
   signal \c$alu_$jOut_app_arg\                                   : contranomy_types.iop;
   signal \c$case_scrut\                                          : contranomy_types.decodedinstruction;
-  signal \c$case_alt_selection\                                  : contranomy_types.shiftright;
+  signal \c$case_alt_selection\                                  : contranomy_types.shift_mode;
   signal \c$aluArg1_selection\                                   : std_logic_vector(6 downto 0);
   signal \c$aluArg2_selection\                                   : std_logic_vector(6 downto 0);
   signal \c$aluArg2_case_alt_selection\                          : std_logic_vector(6 downto 0);
@@ -92,7 +92,7 @@ begin
   \c$case_alt_selection\ <= \c$case_scrut\.decodedinstruction_sel5_srla;
 
   -- src/Contranomy/Core/ALU.hs:(90,13)-(92,86)
-  \c$case_alt\ <= std_logic_vector(shift_right(unsigned(\aluArg1\),to_integer(result_3))) when std_match("0", \c$case_alt_selection\) else
+  \c$case_alt\ <= std_logic_vector(shift_right(unsigned(\aluArg1\),to_integer(result_3))) when \c$case_alt_selection\ = shift_mode_logical else
                   std_logic_vector((shift_right(\c$b_app_arg\,to_integer(result_3))));
 
   result_1 <= std_logic_vector'("1") when b else

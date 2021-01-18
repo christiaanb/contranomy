@@ -64,12 +64,13 @@ package contranomy_types is
 
   subtype clk_core is std_logic;
 
+  type shift_mode is (shift_mode_logical, shift_mode_arithmetic);
+
   -- dirty types
 
   subtype register_r is std_logic_vector(4 downto 0);
   subtype bursttypeextension is std_logic_vector(1 downto 0);
 
-  subtype shiftright is std_logic_vector(0 downto 0);
   type wishbones2m is record
     wishbones2m_sel0_readdata : std_logic_vector(31 downto 0);
     wishbones2m_sel1_acknowledge : boolean;
@@ -88,7 +89,7 @@ package contranomy_types is
     decodedinstruction_sel2_rs1 : contranomy_types.register_r;
     decodedinstruction_sel3_rs2 : contranomy_types.register_r;
     decodedinstruction_sel4_iop : contranomy_types.iop;
-    decodedinstruction_sel5_srla : contranomy_types.shiftright;
+    decodedinstruction_sel5_srla : contranomy_types.shift_mode;
     decodedinstruction_sel6_shamt : std_logic_vector(4 downto 0);
     decodedinstruction_sel7_issub : boolean;
     decodedinstruction_sel8_ism : boolean;
@@ -331,9 +332,29 @@ package contranomy_types is
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_1;
   function toSLV (p : contranomy_types.tup2_2) return std_logic_vector;
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_2;
+
+  function toSLV (b : in shift_mode) return std_logic_vector;
+  function fromSLV (sl : in std_logic_vector(0 downto 0)) return shift_mode;
+
+
 end;
 
 package body contranomy_types is
+  function toSLV (b : in shift_mode) return std_logic_vector is
+  begin
+    case b is 
+      when shift_mode_logical => return "0";
+      when shift_mode_arithmetic => return "1";
+    end case;
+  end;
+  function fromSLV (sl : in std_logic_vector(0 downto 0)) return shift_mode is
+  begin
+    case sl is
+      when "0"    => return shift_mode_logical;
+      when others => return shift_mode_arithmetic;
+    end case;
+  end;
+
   function toSLV (slv : in std_logic_vector) return std_logic_vector is
   begin
     return slv;

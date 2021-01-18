@@ -88,7 +88,7 @@ begin
             , decodedinstruction_sel2_rs1 => (w(19 downto 15))
             , decodedinstruction_sel3_rs2 => \c$app_arg_5\
             , decodedinstruction_sel4_iop => \c$app_arg_4\
-            , decodedinstruction_sel5_srla => \c$app_arg_3\
+            , decodedinstruction_sel5_srla => fromSLV(\c$app_arg_3\)
             , decodedinstruction_sel6_shamt => \c$app_arg_5\
             , decodedinstruction_sel7_issub => \c$app_arg_3\ = std_logic_vector'("1")
             , decodedinstruction_sel8_ism => bv = std_logic_vector'("1")

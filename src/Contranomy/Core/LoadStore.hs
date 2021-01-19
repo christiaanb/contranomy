@@ -37,7 +37,11 @@ loadStoreUnit ::
   -- 2. The address causing a data-access fault on the data bus
   -- 3. The misaligned address
   -- 4. Data bus transaction completed
-  (WishboneM2S 4 30, Maybe MachineWord, Maybe MachineWord, Maybe MachineWord, Bool)
+  ( WishboneM2S 4 30
+  , Maybe MachineWord
+  , Maybe MachineWord
+  , Maybe MachineWord
+  , Bool )
 loadStoreUnit instruction instructionFault addr toStore dBusS2M = case opcode of
   LOAD | not instructionFault ->
     let loadData = case loadStoreWidth of

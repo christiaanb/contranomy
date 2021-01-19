@@ -24,6 +24,8 @@ package contranomy_types is
 
   -- exception_in
   subtype maybe_machineword is std_logic_vector(32 downto 0);
+  constant nothing_machineword : contranomy_types.maybe_machineword := (32 => '0', others => '-');
+
   type exception_in is record
     ei_instraccessfault      : boolean;
     ei_instr_addr_misaligned : boolean;
@@ -244,14 +246,6 @@ package contranomy_types is
   end record;
   subtype maybe_0 is std_logic_vector(32 downto 0);
 
-  type tup5 is record
-    tup5_sel0_wishbonem2s : contranomy_types.wishbonem2s;
-    tup5_sel1_maybe_0_0 : contranomy_types.maybe_0;
-    tup5_sel2_maybe_0_1 : contranomy_types.maybe_0;
-    tup5_sel3_maybe_0_2 : contranomy_types.maybe_0;
-    tup5_sel4_boolean : boolean;
-  end record;
-
   type tup2_1 is record
     tup2_1_sel0_maybe_0 : contranomy_types.maybe_0;
     tup2_1_sel1_std_logic_vector : std_logic_vector(31 downto 0);
@@ -263,29 +257,6 @@ package contranomy_types is
   function toSLV (b : in shift_mode) return std_logic_vector;
   function fromSLV (sl : in std_logic_vector(0 downto 0)) return shift_mode;
   function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_7;
-end;
-
-package body contranomy_types is
-  function toSLV (b : in shift_mode) return std_logic_vector is
-  begin
-    case b is 
-      when shift_mode_logical => return "0";
-      when shift_mode_arithmetic => return "1";
-    end case;
-  end;
-  function fromSLV (sl : in std_logic_vector(0 downto 0)) return shift_mode is
-  begin
-    case sl is
-      when "0"    => return shift_mode_logical;
-      when others => return shift_mode_arithmetic;
-    end case;
-  end;
-
-  function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_7 is
-  alias islv : std_logic_vector(0 to slv'length - 1) is slv;
-  begin
-    return (islv(0 to 4),islv(5 to 36));
-  end;
 
   -- constants
   constant INSTRUCTION_ADDRESS_MISALIGNED : mcause := (False, "0000");
@@ -399,3 +370,28 @@ package body contranomy_types is
 
 end;
 
+package body contranomy_types is
+  function toSLV (b : in shift_mode) return std_logic_vector is
+  begin
+    case b is
+      when shift_mode_logical => return "0";
+      when shift_mode_arithmetic => return "1";
+    end case;
+  end;
+  function fromSLV (sl : in std_logic_vector(0 downto 0)) return shift_mode is
+  begin
+    case sl is
+      when "0"    => return shift_mode_logical;
+      when others => return shift_mode_arithmetic;
+    end case;
+  end;
+
+  function fromSLV (slv : in std_logic_vector) return contranomy_types.tup2_7 is
+  alias islv : std_logic_vector(0 to slv'length - 1) is slv;
+  begin
+    return (islv(0 to 4),islv(5 to 36));
+  end;
+
+
+
+end;

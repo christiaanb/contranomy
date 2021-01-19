@@ -101,8 +101,6 @@ architecture structural of core is
   signal \c$case_scrut_0\                          : contranomy_types.tup2_4;
   -- src/Contranomy/Core.hs:(96,1)-(180,10)
   signal \loadStoreFinished\                       : boolean;
-  -- src/Contranomy/Core.hs:134:9-76
-  signal ds14                                      : contranomy_types.tup5;
   -- src/Contranomy/Core.hs:129:7-51
   signal \aluIResult\                              : std_logic_vector(31 downto 0);
   -- src/Contranomy/Core.hs:141:44
@@ -203,6 +201,8 @@ architecture structural of core is
   signal \c$case_alt_selection\                    : boolean;
   signal \c$case_alt_0_selection\                  : boolean;
 
+  signal dataAccessFault     : contranomy_types.maybe_machineword;
+  signal dataAddrMisaligned  : contranomy_types.maybe_machineword;
 begin
   -- src/Contranomy/Core.hs:(67,1)-(88,5)
   -- src/Contranomy/Clash/Extra.hs:(27,1)-(30,22)
@@ -352,8 +352,6 @@ begin
   \registerWrite\ <= std_logic_vector'("0" & "-------------------------------------") when trap else
                      result_2;
 
-  \dBusM2S1\ <= ds14.tup5_sel0_wishbonem2s;
-
   result_2_selection_res <= (rd) = (std_logic_vector(to_unsigned(0,5)));
 
   -- src/Contranomy/Core.hs:163:20-27
@@ -445,8 +443,6 @@ begin
 
   a4_0 <= \ldVal\(31 downto 0);
 
-  \ldVal\ <= ds14.tup5_sel1_maybe_0_0;
-
   rd <= \c$decodeInstructionOut\.decodedinstruction_sel1_rd;
 
   b1_2 <= b1_3.clash_internal_0_sel1_unsigned;
@@ -485,8 +481,8 @@ begin
   \c$case_scrut_0_fun_arg_0\ <= ( ei_instraccessfault => ipv
                                 , ei_instr_addr_misaligned => y /= std_logic_vector'("00")
                                 , ei_instr_illegal => \c$ds14_case_alt\
-                                , ei_data_access_fault => ds14.tup5_sel2_maybe_0_1
-                                , ei_data_addr_misaligned => ds14.tup5_sel3_maybe_0_2
+                                , ei_data_access_fault => dataAccessFault
+                                , ei_data_addr_misaligned => dataAddrMisaligned
                                 , ei_timer_interrupt => eta.tup2_sel0_corein.corein_sel2_timerinterrupt
                                 , ei_software_interrupt => eta.tup2_sel0_corein.corein_sel3_softwareinterrupt
                                 , ei_external_interrupt => eta.tup2_sel0_corein.corein_sel4_externalinterrupt );
@@ -506,18 +502,21 @@ begin
       , ds1           => \pcN\
       , \c$arg\       => \c$case_scrut_0_fun_arg_1\ );
 
-  \loadStoreFinished\ <= ds14.tup5_sel4_boolean;
-
   ds14_fun_arg <= eta.tup2_sel0_corein.corein_sel1_dbuss2m;
 
   loadstoreunit_ds14 : entity loadstoreunit
     port map
-      ( result             => ds14
-      , instruction        => result_8
-      , \instructionFault\ => \c$ds14_app_arg\
-      , addr               => \aluIResult\
-      , \toStore\          => \rs2Val\
-      , \dBusS2M\          => ds14_fun_arg );
+      ( transactionComplete => \loadStoreFinished\
+      , dBusM2S             => \dBusM2S1\
+      , loadVal             => \ldVal\
+      , dataAccessFault     => dataAccessFault
+      , dataAddrMisaligned  => dataAddrMisaligned
+
+      , instruction      => result_8
+      , instructionFault => \c$ds14_app_arg\
+      , addr             => \aluIResult\
+      , toStore          => \rs2Val\
+      , dBusS2M          => ds14_fun_arg );
 
   alu_aluiresult : entity alu
     port map
@@ -573,7 +572,7 @@ begin
                                         result_8 when others;
 
   -- src/Contranomy/Core/CoreState.hs:30:1-25
-  -- register begin 
+  -- register begin
   result_3_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -589,7 +588,7 @@ begin
   x <= result_0.tup2_0_sel1_corestate.corestate_sel4_rvfiorder;
 
   -- src/Contranomy/Core/MachineState.hs:36:1-23
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mstatus_mie_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -603,7 +602,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:36:1-23
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mstatus_mpie_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -625,7 +624,7 @@ begin
               , mstatus_sel1_mpie => \c$app_arg_machineState_mstatus_mpie\ );
 
   -- src/Contranomy/Instruction.hs:155:1-22
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mcause_interrupt_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -639,7 +638,7 @@ begin
   -- register end
 
   -- src/Contranomy/Instruction.hs:155:1-22
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mcause_code_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -661,7 +660,7 @@ begin
               , mcause_sel1_code => \c$app_arg_machineState_mcause_code\ );
 
   -- src/Contranomy/Core/MachineState.hs:79:1-28
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mtvec_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -675,7 +674,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:64:1-19
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mie_meie_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -689,7 +688,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:64:1-19
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mie_mtie_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -703,7 +702,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:64:1-19
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mie_msie_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -728,7 +727,7 @@ begin
               , mie_sel2_msie => \c$app_arg_machineState_mie_msie\ );
 
   -- src/Contranomy/Core/MachineState.hs:79:1-28
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mscratch_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -742,7 +741,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:79:1-28
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mepc_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -756,7 +755,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:79:1-28
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_mtval_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -770,7 +769,7 @@ begin
   -- register end
 
   -- src/Contranomy/Core/MachineState.hs:79:1-28
-  -- register begin 
+  -- register begin
   capp_arg_machinestate_irqmask_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -812,7 +811,7 @@ begin
   x_15 <= result_0.tup2_0_sel1_corestate.corestate_sel3_machinestate;
 
   -- src/Contranomy/Core/CoreState.hs:30:1-25
-  -- register begin 
+  -- register begin
   result_8_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -828,7 +827,7 @@ begin
   x_16 <= result_0.tup2_0_sel1_corestate.corestate_sel2_instruction;
 
   -- src/Contranomy/Core/CoreState.hs:30:1-25
-  -- register begin 
+  -- register begin
   result_9_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -844,7 +843,7 @@ begin
   x_17 <= result_0.tup2_0_sel1_corestate.corestate_sel1_pc;
 
   -- src/Contranomy/Core/CoreState.hs:30:1-25
-  -- register begin 
+  -- register begin
   result_10_register : process(\c$ds_bindCsr\)
   begin
     if rising_edge(\c$ds_bindCsr\) then
@@ -861,4 +860,3 @@ begin
 
 
 end;
-

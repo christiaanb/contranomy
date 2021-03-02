@@ -1,118 +1,157 @@
-# Table of Contents
-- [Table of Contents](#table-of-contents)
-- [Downloading this example project](#downloading-this-example-project)
-- [Using this project](#using-this-project)
-  - [Stack (Windows, Linux, MacOS) [recommended]](#stack-windows-linux-macos-recommended)
-  - [Snap (Linux)](#snap-linux)
-  - [Cabal (Linux, MacOS)](#cabal-linux-macos)
-  - [Nix (Linux, MacOS)](#nix-linux-macos)
-  - [There's so many! Which should I pick?](#theres-so-many-which-should-i-pick)
-- [Change the LICENSE](#change-the-license)
-- [IDE support](#ide-support)
+## Introduction
+This repository hosts a *non*-pipelined RV32I RISC-V core written in Clash.
+Some relevant details:
 
-# Downloading this example project
-We publish an example project with every Clash release. You can find a list of releases at [github.com/clash-lang/clash-compiler/releases](https://github.com/clash-lang/clash-compiler/releases). Look for "starter project" under "Assets".
+* Support for the full unprivileged RV32I Base Integer Instruction set [1]:
+  * `FENCE` is treated as a NOP
+* Support for the following privileged instructions [1]:
+  * `ECALL`
+  * `EBREAK`
+  * `MRET`
+* Zifencei extension `FENCE.I` is treated as a NOP
+* Support for the Zicsr CSR instructions
+* Implements the following machine-level CSRs as specified in the privileged architecture[1]:
+  * `mstatus`
+  * `mcause`
+  * `mtvec`
+  * `mie`
+  * `mscratch`
+  * `mepc`
+  * `mtval`
+* Supports timer, software, and 32 external interrupts:
+  * External IRQ mask CSR has address `0x330`
+  * External IRQ pending CSR has address `0x360`
+* According to spec: the core traps on all unsupported instructions with exception code 2, illegal instruction, loaded into the `mcause` CSR.
+* Full trap support in accordance to the privileged architecture[1] specification.
+* Fetches instructions and data over a Wishbone Classic bus: minimum of 2-cycle round-trip time for both busses.
 
-# Using this project
-There's a number of ways to build this project on your machine. The recommended way of doing so is using _Stack_, whose instructions will follow directly after this section. Depending on your or your organization's needs, you might want to select another tool though. If you need help deciding, scroll down to [There's so many! Which should I pick?](#theres-so-many-which-should-i-pick).
+[1] https://riscv.org/technical/specifications/
 
+## Workshop video
+https://www.youtube.com/watch?v=NFguFKbuB_c is a 3 hour workshop video
+describing the core in light detail and demonstrating the effects of the
+instructions given below. It also shows the core running on an actual FPGA.
 
-## Stack (Windows, Linux, MacOS) [recommended]
-Install Stack using your package manager or refer to the [How to install](https://docs.haskellstack.org/en/stable/README/#how-to-install) section of the [Stack manual](https://docs.haskellstack.org/en/stable/README/).
+## Initial setup
 
-Build the project with:
+Create a directory `contranomy-tutorial`
 
-```bash
-stack build
+```
+mkdir contranomy-tutorial
 ```
 
-To compile the project to Verilog, run:
+Change directory into `contranomy-tutorial` and clone the following repositories:
 
-```bash
-stack run clash -- Contranomy --verilog
+```
+cd contranomy-tutorial
+git clone https://github.com/christiaanb/contranomy.git
+git clone -b contranomy https://github.com/christiaanb/litex
+git clone https://github.com/christiaanb/pythondata-cpu-contranomy.git
+git clone -b contranomy https://github.com/christiaanb/riscv-formal.git
 ```
 
+Create a python virtual env and enter/activate it:
 
-## Snap (Linux)
-Linux users can use _snap_ to install Clash on their machines. See [snapcraft.io/clash](https://snapcraft.io/clash) how to do so. After installing Clash through snap, you can compile this project using:
-
-```bash
-clash.cabal update
-clash.cabal build
+```
+python3 -m virtualenv .
+source bin/activate
 ```
 
-You only have to run the update command once. After that, you can keep rebuilding your project by running the build command.
+Install the `pythondata-cpu-contranomy` package into the virtual environment
 
-To compile the project to Verilog, run:
-
-```bash
-clash.cabal build --write-ghc-environment-files=always
-clash Contranomy --verilog
+```
+cd pythondata-cpu-contranomy
+python3 setup.py develop
 ```
 
-<!-- omit in toc -->
-### Notes on using snap for your project
+Change directory into `litex` and run the following commands
 
-1. By default, snaps will update to the latest stable release of Clash. This is a problem, because new (major) releases might break your design. To mitigate this, the next major Clash release (1.4) will introduce a [Snap channel](https://snapcraft.io/docs/channels) that will allow you to keep using 1.2.
-2. The version of `clash-{prelude,lib,ghc}` your project depends on must exactly match the one supplied in the snap. For this reason, we recommend specifying a range of Clash versions your project can work with. This way, cabal will automatically prefer the version installed int he snap.
-
-## Cabal (Linux, MacOS)
-**The following instructions only work for Cabal >=3.0, GHC >=8.4, and Clash >=1.2.2.**
-
-First, update your cabal package database:
-
-```bash
-cabal update
+```
+cd ..
+cd litex
+./litex_setup.py init
+./litex_setup.py install
+./litex_setup.py gcc
 ```
 
-You only have to run the update command once. After that, you can keep rebuilding your project by running the build command:
+Go back up to the `contranomy-tutorial` directory and add the installed RISC-V toolchain to your PATH
 
-```bash
-cabal build
+```
+cd ..
+PATH=$PATH:$(echo $PWD/riscv64-*/bin/)
 ```
 
-To compile the project to Verilog, run:
+And check that everything works by running:
 
-```bash
-cabal run clash -- Contranomy --verilog
+```
+lxsim --cpu-type contranomy
 ```
 
+You can exit the simulator by pressing `Ctrl+C` and the close the virtual environment with
 
-## Nix (Linux, MacOS)
-To be done.
+```
+deactivate
+```
 
-## There's so many! Which should I pick?
-In general we recommend **Stack**. It offers a great balance between ease of use, flexibility, and reliability. On top of that, it's easy to install and use on Windows. Of course, it is not going to suit everyone. What follows is a comparison table between the different toolchains.
+## Coming back
 
-|                     | Snap | Cabal     | Stack    | Nix      |
-|---------------------|------|-----------|----------|----------|
-| Windows             |      | ¹         | ✓        |          |
-| Linux               | ✓    | ✓         | ✓        | ✓        |
-| macOS               |      | ✓         | ✓        | ✓        |
-| Binary cache²       | ✓    |           |          | ✓        |
-| Ease of use         | Easy | Moderate³ | Easy     | Hard⁴    |
-| Flexibility⁵        | Low  | Moderate  | Moderate | High     |
-| Snapshots⁵          |      | ⁶         | ✓        | ✓        |
-| `ghcide` compatible |      | ✓         | ✓        | Probably |
+Whenever you're coming back you simply need to source the python virtual env:
 
-Notes in table:
+```
+source bin/activate
+```
 
-1. Although Cabal does run on Windows, as of the time of writing -May 2020- it doesn't offer an easy way to install itself.
-2. Binary caches store project dependencies in their binary form on some centralized system. This helps to greatly reduce build times. See [the NixOS page on binary caches](https://nixos.wiki/wiki/Binary_Cache) for more information.
-3. Ease of use is set to _moderate_ for now as it:
-   * ..does not manage GHC installations. Users are responsible for installing the right `ghc` and passing it to cabal.
-   * ..offers multiple ways of compiling a project ("old style" and "new style") which is reflected in the, scattered, cabal user documentation.
-   * ..is hard to install for Windows users
-4. Nix is notoriously hard to setup. However, many users claim that once it's setup it's a breeze to use. YMMV.
-5. TODO
-6. Cabal offers snapshots through "freeze files". Freeze files pin all (transitive) dependencies of a project to a specific version. In contrast, Stack and Nix offer snapshots of versions of Haskell packages known to work together. In other words, when using Cabal the burden of figuring out which dependency works with which is on the user.
+and add the RISC-V toolchain to your PATH:
 
-# IDE support
-We currently recommend Visual Studio Code in combination with `ghcide`. To use it, execute the following steps:
+```
+PATH=$PATH:$(echo $PWD/riscv64-*/bin/)
+```
 
-1. Install Visual Studio Code. If your Linux distribution supports `snap`, it's as simple as executing `sudo snap install code`. If you're running another platform, head over to [code.visualstudio.com](https://code.visualstudio.com/) for more information.
-2. Launch Visual Studio Code, click on "Extensions" on the left, search for and install the extension `ghcide`.
-3. Install `ghcide` using the instructions [over here](https://github.com/digital-asset/ghcide#using-it).
-4. Open this folder in Visual Studio Code.
-5. [Wait a few minutes](https://imgs.xkcd.com/comics/compiling.png)
-6. Enjoy Clash!
+## Running the RISC-V Formal Verification Framework on the Contranomy core
+
+First, [install Yosys, SymbiYosys, and Boolector](http://symbiyosys.readthedocs.io/en/latest/quickstart.html#installing) and make sure those tools are in your PATH.
+
+Then go to `contranomy` and generate the Verilog:
+
+```
+cd contranomy
+stack run clash -- --verilog Contranomy
+```
+
+Next, go to the `contranomy` cores directory in `riscv-formal`:
+
+```
+cd ..
+cd riscv-formal/cores/contranomy
+```
+
+And copy the relevant `.v` and `.inc` file
+
+```
+cp ../../../contranomy/verilog/Contranomy/contranomyRVFI/contranomyRVFI.v ./
+cp ../../../contranomy/verilog/Contranomy/contranomyRVFI/ContranomyCoreMachineStateDirect.inc ./
+```
+
+Then create all the tests:
+
+```
+python3 ../../checks/genchecks.py
+```
+
+Run the tests:
+
+```
+make -C checks -j$(nproc)
+```
+
+Once the tests are finished, collect the results:
+
+```
+bash cexdata.sh
+```
+
+and inspect the results:
+
+```
+cat cexdata/status.txt
+```

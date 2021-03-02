@@ -104,7 +104,7 @@ decodeInstruction w
               func7 == 0b010_0000  -- SRA
         OR -> func7 == 0
         AND -> func7 == 0
-      MISC_MEM -> func3 == 1
+      MISC_MEM -> func3 < 2 -- FENCE and FENCE.I
       SYSTEM -> case func3 of
         0 -> case System12 func12 of
           ECALL -> True
